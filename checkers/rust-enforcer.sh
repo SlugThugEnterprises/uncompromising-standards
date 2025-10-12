@@ -29,18 +29,29 @@ if [ ! -f "$RUST_FILE" ]; then
     exit 1
 fi
 
+# Detect if this is a test file
+IS_TEST_FILE=0
+if [[ "$RUST_FILE" =~ /tests?/ ]] || [[ "$RUST_FILE" =~ _test\.rs$ ]] || grep -q '#\[cfg(test)\]' "$RUST_FILE" 2>/dev/null; then
+    IS_TEST_FILE=1
+fi
+
 # Critical patterns (will fail the check)
+# Note: unwrap/expect/panic are allowed in test files (standard practice)
 declare -A CRITICAL_PATTERNS=(
     ["unsafe"]='\bunsafe\s+(fn|impl|trait|\{|struct|enum)'
-    ["unwrap"]='\.unwrap\s*\('
-    ["expect"]='\.expect\s*\('
-    ["panic"]='\bpanic!\s*\('
     ["todo"]='(TODO|FIXME|HACK|XXX|TEMP|WIP|PLACEHOLDER)'
     ["mock"]='(mock|Mock|fake|Fake|stub|Stub|dummy|Dummy)\s*(struct|impl|fn|mod)'
     ["unimplemented"]='\bunimplemented!\s*\('
     ["allow_dead_code"]='#\[allow\(dead_code\)\]'
     ["allow_unused"]='#\[allow\(unused'
     ["dbg_macro"]='\bdbg!\s*\('
+)
+
+# Additional patterns only checked in production code (not tests)
+declare -A PRODUCTION_ONLY_PATTERNS=(
+    ["unwrap"]='\.unwrap\s*\('
+    ["expect"]='\.expect\s*\('
+    ["panic"]='\bpanic!\s*\('
 )
 
 # Error patterns (should be fixed)
@@ -108,6 +119,16 @@ for desc in "${!CRITICAL_PATTERNS[@]}"; do
     pattern="${CRITICAL_PATTERNS[$desc]}"
     check_pattern "$pattern" "critical" "No $desc allowed" "$RUST_FILE"
 done
+
+# Check production-only patterns (skip for test files)
+if [ $IS_TEST_FILE -eq 0 ]; then
+    for desc in "${!PRODUCTION_ONLY_PATTERNS[@]}"; do
+        pattern="${PRODUCTION_ONLY_PATTERNS[$desc]}"
+        check_pattern "$pattern" "critical" "No $desc allowed in production code" "$RUST_FILE"
+    done
+else
+    echo "ℹ️  Test file detected - allowing unwrap()/expect()/panic!() as standard practice"
+fi
 
 # Check println! outside of main.rs and tests
 if [[ ! "$RUST_FILE" =~ main\.rs$ ]] && [[ ! "$RUST_FILE" =~ /tests?/ ]] && [[ ! "$RUST_FILE" =~ _test\.rs$ ]]; then

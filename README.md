@@ -149,7 +149,7 @@ done
 
 ### Rust Example
 
-**❌ FAILS:**
+**❌ FAILS (Production Code):**
 ```rust
 fn process(data: &str) -> String {
     let parsed = serde_json::from_str(data).unwrap();  // ← CRITICAL
@@ -164,7 +164,7 @@ fn process(data: &str) -> String {
 }
 ```
 
-**✅ PASSES:**
+**✅ PASSES (Production Code):**
 ```rust
 fn process(data: &str) -> Result<String, Error> {
     let parsed = serde_json::from_str(data)
@@ -179,6 +179,21 @@ fn process(data: &str) -> Result<String, Error> {
     Ok(value.to_string())
 }
 ```
+
+**✅ ALSO PASSES (Test Code):**
+```rust
+#[cfg(test)]
+mod tests {
+    #[test]
+    fn test_processing() {
+        let data = r#"{"key":"value"}"#;
+        let result = process(data).unwrap();  // ← OK in tests!
+        assert_eq!(result, "value");
+    }
+}
+```
+
+**Note:** `.unwrap()`, `.expect()`, and `panic!()` are **allowed and encouraged** in test code. They make tests clearer and more idiomatic. The enforcer automatically detects test files (in `tests/` directories, `_test.rs` files, or `#[cfg(test)]` modules) and permits these patterns.
 
 ### Python Example
 
@@ -224,9 +239,10 @@ global:
 
 rust:
   enforce_error_handling: true
-  ban_unwrap: true
-  ban_expect: true
-  ban_panic: true
+  ban_unwrap: true  # Only in production code
+  ban_expect: true  # Only in production code
+  ban_panic: true   # Only in production code
+  allow_in_tests: true  # unwrap/expect/panic OK in tests (standard practice)
 
 python:
   ban_bare_except: true
