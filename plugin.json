@@ -1,0 +1,82 @@
+{
+  "name": "uncompromising-standards",
+  "version": "1.0.0",
+  "description": "Code so good you could trust it with your friend's mom's life. Static quality enforcement for Rust, Go, Python, Ruby, JS/TS, Bash, SQL, and Markdown.",
+  "author": "SlugThugEnterprises",
+  "license": "MIT",
+  "homepage": "https://github.com/SlugThugEnterprises/uncompromising-standards",
+  "commands": [
+    {
+      "name": "check-rust",
+      "description": "Enforce uncompromising Rust standards",
+      "path": "commands/check-rust.md"
+    },
+    {
+      "name": "check-go",
+      "description": "Enforce uncompromising Go standards",
+      "path": "commands/check-go.md"
+    },
+    {
+      "name": "check-python",
+      "description": "Enforce uncompromising Python standards",
+      "path": "commands/check-python.md"
+    },
+    {
+      "name": "check-ruby",
+      "description": "Enforce uncompromising Ruby standards",
+      "path": "commands/check-ruby.md"
+    },
+    {
+      "name": "check-js",
+      "description": "Enforce uncompromising JavaScript/TypeScript standards",
+      "path": "commands/check-js.md"
+    },
+    {
+      "name": "check-bash",
+      "description": "Enforce uncompromising Bash standards",
+      "path": "commands/check-bash.md"
+    },
+    {
+      "name": "check-sql",
+      "description": "Enforce uncompromising SQL standards",
+      "path": "commands/check-sql.md"
+    },
+    {
+      "name": "check-docs",
+      "description": "Enforce uncompromising documentation standards",
+      "path": "commands/check-docs.md"
+    },
+    {
+      "name": "check-all",
+      "description": "Enforce standards across all supported languages",
+      "path": "commands/check-all.md"
+    }
+  ],
+  "hooks": {
+    "pre-commit": "hooks/pre-commit-standards.sh"
+  },
+  "config": {
+    "path": "config/standards.yaml",
+    "schema": {
+      "global": {
+        "max_file_lines": 200,
+        "max_function_lines": 50,
+        "allow_single_letter_vars": ["i", "j", "k", "x", "y", "z"]
+      }
+    }
+  },
+  "tags": [
+    "linting",
+    "quality",
+    "standards",
+    "static-analysis",
+    "rust",
+    "go",
+    "python",
+    "ruby",
+    "javascript",
+    "typescript",
+    "bash",
+    "sql"
+  ]
+}

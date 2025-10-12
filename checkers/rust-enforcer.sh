@@ -1,0 +1,190 @@
+#!/usr/bin/env bash
+set -uo pipefail
+
+# Fast Rust pattern checker - lightweight alternative to rust-analyzer
+# Uses regex patterns to catch common issues without full compilation
+
+RULES_FILE="${RULES_FILE:-/opt/claude-code-marketplace/plugins/coding-standards-enforcer/rules/rust/rules.yaml}"
+EXIT_CODE=0
+WARNINGS=0
+ERRORS=0
+CRITICAL=0
+
+# Color output
+RED='\033[0;31m'
+YELLOW='\033[1;33m'
+GREEN='\033[0;32m'
+NC='\033[0m'
+
+# Check if file provided
+if [ $# -eq 0 ]; then
+    echo "Usage: $0 <rust-file.rs>"
+    exit 1
+fi
+
+RUST_FILE="$1"
+
+if [ ! -f "$RUST_FILE" ]; then
+    echo "Error: File not found: $RUST_FILE"
+    exit 1
+fi
+
+# Critical patterns (will fail the check)
+declare -A CRITICAL_PATTERNS=(
+    ["unsafe"]='\bunsafe\s+(fn|impl|trait|\{|struct|enum)'
+    ["unwrap"]='\.unwrap\s*\('
+    ["expect"]='\.expect\s*\('
+    ["panic"]='\bpanic!\s*\('
+    ["todo"]='(TODO|FIXME|HACK|XXX|TEMP|WIP|PLACEHOLDER)'
+    ["mock"]='(mock|Mock|fake|Fake|stub|Stub|dummy|Dummy)\s*(struct|impl|fn|mod)'
+    ["unimplemented"]='\bunimplemented!\s*\('
+    ["allow_dead_code"]='#\[allow\(dead_code\)\]'
+    ["allow_unused"]='#\[allow\(unused'
+    ["dbg_macro"]='\bdbg!\s*\('
+)
+
+# Error patterns (should be fixed)
+declare -A ERROR_PATTERNS=(
+    ["clone_on_copy"]='\.clone\(\)'
+    ["unwrap_or_default"]='\.unwrap_or_default\(\)'
+    ["as_str_to_string"]='\.as_str\(\)\.to_string\(\)'
+)
+
+# Warning patterns (should be reviewed)
+declare -A WARNING_PATTERNS=(
+    ["missing_doc_comment"]='^\\s*pub\\s+(fn|struct|enum|trait|impl)\\s+\\w+'
+    ["long_function"]=''
+)
+
+check_pattern() {
+    local pattern="$1"
+    local severity="$2"
+    local description="$3"
+    local file="$4"
+
+    if grep -Pq "$pattern" "$file" 2>/dev/null; then
+        local line_numbers=$(grep -Pn "$pattern" "$file" 2>/dev/null | cut -d: -f1 | tr '\n' ',' | sed 's/,$//')
+
+        case "$severity" in
+            critical)
+                echo -e "${RED}🚨 CRITICAL${NC}: $description"
+                echo "   File: $file"
+                echo "   Lines: $line_numbers"
+                ((CRITICAL++))
+                EXIT_CODE=1
+                ;;
+            error)
+                echo -e "${RED}❌ ERROR${NC}: $description"
+                echo "   File: $file"
+                echo "   Lines: $line_numbers"
+                ((ERRORS++))
+                ;;
+            warning)
+                echo -e "${YELLOW}⚠️  WARNING${NC}: $description"
+                echo "   File: $file"
+                echo "   Lines: $line_numbers"
+                ((WARNINGS++))
+                ;;
+        esac
+    fi
+}
+
+echo "🔍 Fast-checking Rust file: $RUST_FILE"
+echo "━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━"
+
+# Check file length (200 line limit)
+LINE_COUNT=$(wc -l < "$RUST_FILE")
+if [ $LINE_COUNT -gt 200 ]; then
+    echo -e "${RED}🚨 CRITICAL${NC}: File exceeds 200 lines"
+    echo "   File: $RUST_FILE"
+    echo "   Lines: $LINE_COUNT (limit: 200)"
+    echo "   Split this file into smaller modules"
+    ((CRITICAL++))
+    EXIT_CODE=1
+fi
+
+# Check critical patterns
+for desc in "${!CRITICAL_PATTERNS[@]}"; do
+    pattern="${CRITICAL_PATTERNS[$desc]}"
+    check_pattern "$pattern" "critical" "No $desc allowed" "$RUST_FILE"
+done
+
+# Check println! outside of main.rs and tests
+if [[ ! "$RUST_FILE" =~ main\.rs$ ]] && [[ ! "$RUST_FILE" =~ /tests?/ ]] && [[ ! "$RUST_FILE" =~ _test\.rs$ ]]; then
+    if grep -Pq '\bprintln!\s*\(' "$RUST_FILE" 2>/dev/null; then
+        line_numbers=$(grep -Pn '\bprintln!\s*\(' "$RUST_FILE" 2>/dev/null | cut -d: -f1 | tr '\n' ',' | sed 's/,$//')
+        echo -e "${RED}❌ ERROR${NC}: println! should only be in main.rs or tests"
+        echo "   File: $RUST_FILE"
+        echo "   Lines: $line_numbers"
+        echo "   Use proper logging (tracing, log, etc.) instead"
+        ((ERRORS++))
+    fi
+fi
+
+# Check for single-letter variable names (except i, j, k in loops, x/y/z in math)
+if grep -Pn '^\s*let\s+[a-hln-wA-Z]\s*[=:]' "$RUST_FILE" 2>/dev/null | grep -v '^\s*let\s*[ijk]\s*[=:]' | grep -v '^\s*let\s*[xyz]\s*[=:]' > /dev/null; then
+    line_numbers=$(grep -Pn '^\s*let\s+[a-hln-wA-Z]\s*[=:]' "$RUST_FILE" 2>/dev/null | grep -v '\s*[ijk]\s*[=:]' | grep -v '\s*[xyz]\s*[=:]' | cut -d: -f1 | tr '\n' ',' | sed 's/,$//')
+    echo -e "${YELLOW}⚠️  WARNING${NC}: Single-letter variable names detected"
+    echo "   File: $RUST_FILE"
+    echo "   Lines: $line_numbers"
+    echo "   Use descriptive names (except i,j,k for loops or x,y,z for math)"
+    ((WARNINGS++))
+fi
+
+# Check function length (50 line limit)
+awk '
+/^[[:space:]]*fn [a-zA-Z_]/ {
+    fn_start = NR
+    fn_name = $0
+    brace_count = 0
+    in_function = 1
+}
+in_function && /{/ { brace_count++ }
+in_function && /}/ {
+    brace_count--
+    if (brace_count == 0) {
+        fn_length = NR - fn_start + 1
+        if (fn_length > 50) {
+            printf "Function too long: line %d, length %d lines\n", fn_start, fn_length
+        }
+        in_function = 0
+    }
+}
+' "$RUST_FILE" | while read line; do
+    if [[ -n "$line" ]]; then
+        echo -e "${RED}🚨 CRITICAL${NC}: $line"
+        echo "   File: $RUST_FILE"
+        echo "   Limit: 50 lines per function"
+        echo "   Split into smaller functions"
+        ((CRITICAL++))
+        EXIT_CODE=1
+    fi
+done
+
+# Check error patterns
+for desc in "${!ERROR_PATTERNS[@]}"; do
+    pattern="${ERROR_PATTERNS[$desc]}"
+    check_pattern "$pattern" "error" "$desc should be avoided" "$RUST_FILE"
+done
+
+# Check warning patterns (only if no critical issues)
+if [ $CRITICAL -eq 0 ]; then
+    for desc in "${!WARNING_PATTERNS[@]}"; do
+        pattern="${WARNING_PATTERNS[$desc]}"
+        [ -n "$pattern" ] && check_pattern "$pattern" "warning" "$desc detected" "$RUST_FILE"
+    done
+fi
+
+echo "━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━"
+echo "📊 Summary:"
+echo "   🚨 Critical: $CRITICAL"
+echo "   ❌ Errors: $ERRORS"
+echo "   ⚠️  Warnings: $WARNINGS"
+
+if [ $EXIT_CODE -eq 0 ]; then
+    echo -e "${GREEN}✅ Check passed!${NC}"
+else
+    echo -e "${RED}❌ Check FAILED - fix critical issues${NC}"
+fi
+
+exit $EXIT_CODE
