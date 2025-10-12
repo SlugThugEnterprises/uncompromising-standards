@@ -1,10 +1,11 @@
 {
   "name": "uncompromising-standards",
-  "version": "1.0.0",
-  "description": "Code so good you could trust it with your friend's mom's life. Static quality enforcement for Rust, Go, Python, Ruby, JS/TS, Bash, SQL, and Markdown.",
+  "version": "2.0.0",
+  "description": "Code so good you could trust it with your friend's mom's life. Mandatory enforcement mode - AI agents cannot bypass quality checks.",
   "author": "SlugThugEnterprises",
   "license": "MIT",
   "homepage": "https://github.com/SlugThugEnterprises/uncompromising-standards",
+  "enforcement_mode": "mandatory",
   "commands": [
     {
       "name": "check-rust",
@@ -53,7 +54,27 @@
     }
   ],
   "hooks": {
-    "pre-commit": "hooks/pre-commit-standards.sh"
+    "pre-write": {
+      "script": "hooks/pre-write.sh",
+      "blocking": true,
+      "description": "Validates code BEFORE writing - blocks bad code"
+    },
+    "post-write": {
+      "script": "hooks/post-write.sh",
+      "blocking": true,
+      "auto_rollback": true,
+      "description": "Validates code AFTER writing - reverts violations"
+    },
+    "pre-commit": {
+      "script": "hooks/pre-commit-standards.sh",
+      "blocking": true,
+      "description": "Final validation before git commit"
+    },
+    "auto-fix": {
+      "script": "hooks/auto-fix.sh",
+      "enabled": true,
+      "description": "Attempts automatic fixes for common violations"
+    }
   },
   "config": {
     "path": "config/standards.yaml",

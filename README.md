@@ -39,6 +39,40 @@ Pick the languages you need. Use one, use all:
 - ❌ Functions must be ≤50 lines (enforces simplicity)
 - ❌ No single-letter variables (except i,j,k for loops, x,y,z for math)
 
+## Version 2.0: Mandatory Enforcement Mode 🔒
+
+**NEW in v2.0:** AI agents now have **ZERO CHOICE** - they either pass standards or their code gets blocked/reverted automatically.
+
+### How Mandatory Enforcement Works:
+
+1. **Pre-Write Hook** - Code is validated BEFORE being written to disk
+   - If standards violated → Write is BLOCKED
+   - AI must fix violations and retry
+
+2. **Post-Write Hook** - Code is validated AFTER being written
+   - If standards violated → File is AUTOMATICALLY REVERTED
+   - Backup is restored or file is deleted
+
+3. **Auto-Fix Mode** - Common violations are fixed automatically
+   - Removes `#[allow(dead_code)]`, `dbg!()`, TODO comments
+   - Removes `console.log()`, `print()` statements
+   - AI gets one chance to fix before blocking
+
+4. **Pre-Commit Hook** - Final gate before git commit
+   - ALL staged files validated
+   - Commit BLOCKED if any violations found
+
+### What AI Agents Cannot Do Anymore:
+
+❌ Write code with `.unwrap()` or `.expect()`
+❌ Leave TODO/FIXME comments
+❌ Hide dead code with `#[allow(...)]`
+❌ Use `print()` or `console.log()` in production
+❌ Create files >200 lines or functions >50 lines
+❌ Skip validation or disable checks
+
+**The code either passes standards or it doesn't get written. Period.**
+
 ## Installation
 
 ### For Claude Code

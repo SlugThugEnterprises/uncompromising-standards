@@ -1,0 +1,67 @@
+{
+  "name": "uncompromising-standards-enforcer",
+  "version": "2.0.0",
+  "enforcement_mode": "mandatory",
+  "description": "Mandatory code quality enforcement - AI agents cannot bypass",
+
+  "hooks": {
+    "pre_write": {
+      "enabled": true,
+      "script": "hooks/pre-write.sh",
+      "blocking": true,
+      "description": "Validates code BEFORE writing - blocks if standards violated"
+    },
+    "post_write": {
+      "enabled": true,
+      "script": "hooks/post-write.sh",
+      "blocking": true,
+      "auto_rollback": true,
+      "description": "Validates code AFTER writing - reverts if standards violated"
+    },
+    "pre_commit": {
+      "enabled": true,
+      "script": "hooks/pre-commit-standards.sh",
+      "blocking": true,
+      "description": "Final validation before git commit"
+    }
+  },
+
+  "file_patterns": {
+    "rust": ["**/*.rs"],
+    "go": ["**/*.go"],
+    "python": ["**/*.py"],
+    "ruby": ["**/*.rb"],
+    "javascript": ["**/*.js", "**/*.jsx"],
+    "typescript": ["**/*.ts", "**/*.tsx"],
+    "bash": ["**/*.sh", "**/*.bash"],
+    "sql": ["**/*.sql"],
+    "markdown": ["**/*.md"]
+  },
+
+  "agent_restrictions": {
+    "cannot_disable_checks": true,
+    "cannot_skip_validation": true,
+    "must_fix_violations": true,
+    "max_retry_attempts": 3,
+    "auto_fix_enabled": true
+  },
+
+  "violation_handling": {
+    "on_pre_write_fail": "block_write",
+    "on_post_write_fail": "auto_rollback",
+    "on_commit_fail": "block_commit",
+    "notify_user": true,
+    "show_violations": true,
+    "suggest_fixes": true
+  },
+
+  "standards": {
+    "global": {
+      "max_file_lines": 200,
+      "max_function_lines": 50,
+      "no_todos": true,
+      "no_dead_code": true,
+      "no_debug_code": true
+    }
+  }
+}
