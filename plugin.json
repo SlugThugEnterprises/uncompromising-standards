@@ -1,7 +1,7 @@
 {
   "name": "uncompromising-standards",
-  "version": "2.0.0",
-  "description": "Code so good you could trust it with your friend's mom's life. Mandatory enforcement mode - AI agents cannot bypass quality checks.",
+  "version": "2.1.0",
+  "description": "Code so good you could trust it with your friend's mom's life. Mandatory enforcement mode - AI agents cannot bypass quality checks. Allows idiomatic unwrap/expect in tests.",
   "author": "SlugThugEnterprises",
   "license": "MIT",
   "homepage": "https://github.com/SlugThugEnterprises/uncompromising-standards",
