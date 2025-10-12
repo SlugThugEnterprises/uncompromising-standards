@@ -1,6 +1,8 @@
 {
   "name": "uncompromising-standards",
-  "owner": "SlugThugEnterprises",
+  "owner": {
+    "name": "SlugThugEnterprises"
+  },
   "version": "1.0.0",
   "description": "Official marketplace for uncompromising code quality standards",
   "plugins": [
