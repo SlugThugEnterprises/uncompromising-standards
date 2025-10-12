@@ -34,7 +34,7 @@ for FILE in $STAGED_FILES; do
 
   case "$EXT" in
     rs)
-      ENFORCER="$CHECKERS_DIR/rust-enforcer.sh"
+      ENFORCER="$CHECKERS_DIR/rust-StaticChecker.sh"
       ;;
     go)
       ENFORCER="$CHECKERS_DIR/go-enforcer.sh"

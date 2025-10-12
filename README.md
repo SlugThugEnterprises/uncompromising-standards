@@ -101,10 +101,10 @@ git clone https://github.com/SlugThugEnterprises/uncompromising-standards.git
 cd uncompromising-standards
 
 # Check a single file
-./checkers/rust-enforcer.sh path/to/file.rs
+./checkers/rust-StaticChecker.sh path/to/file.rs
 
 # Check entire directory recursively
-./checkers/rust-enforcer.sh path/to/directory/
+./checkers/rust-StaticChecker.sh path/to/directory/
 ```
 
 ## Usage
@@ -131,7 +131,7 @@ Each enforcer is standalone:
 
 ```bash
 # Rust
-./checkers/rust-enforcer.sh src/
+./checkers/rust-StaticChecker.sh src/
 
 # Python
 ./checkers/python-enforcer.py app/
@@ -265,7 +265,7 @@ python:
 - name: Enforce Code Standards
   run: |
     git clone https://github.com/SlugThugEnterprises/uncompromising-standards.git
-    ./uncompromising-standards/checkers/rust-enforcer.sh src/
+    ./uncompromising-standards/checkers/rust-StaticChecker.sh src/
     ./uncompromising-standards/checkers/python-enforcer.py app/
 ```
 
@@ -275,7 +275,7 @@ python:
 #!/bin/bash
 # .git/hooks/pre-commit
 
-./checkers/rust-enforcer.sh src/ || exit 1
+./checkers/rust-StaticChecker.sh src/ || exit 1
 ./checkers/python-enforcer.py app/ || exit 1
 echo "✅ Code standards enforced"
 ```

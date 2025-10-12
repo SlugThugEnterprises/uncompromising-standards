@@ -21,7 +21,7 @@ echo -e "${YELLOW}🛡️  ENFORCING STANDARDS: $FILE_PATH${NC}"
 # Route to appropriate enforcer
 case "$FILE_EXT" in
   rs)
-    "$CHECKERS_DIR/rust-enforcer.sh" "$FILE_PATH"
+    "$CHECKERS_DIR/rust-StaticChecker.sh" "$FILE_PATH"
     ;;
   go)
     "$CHECKERS_DIR/go-enforcer.sh" "$FILE_PATH"
