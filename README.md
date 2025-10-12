@@ -193,7 +193,14 @@ mod tests {
 }
 ```
 
-**Note:** `.unwrap()`, `.expect()`, and `panic!()` are **allowed and encouraged** in test code. They make tests clearer and more idiomatic. The enforcer automatically detects test files (in `tests/` directories, `_test.rs` files, or `#[cfg(test)]` modules) and permits these patterns.
+**Note:** `.unwrap()`, `.expect()`, and `panic!()` are **allowed and encouraged** in test code. They make tests clearer and more idiomatic.
+
+**Test File Detection (Strict Naming):**
+Test files MUST follow one of these patterns:
+1. ✅ In `tests/` directory: `tests/integration.rs`
+2. ✅ End with `_test.rs`: `src/routes_test.rs`
+
+**Why strict naming?** Makes tests visually obvious - anyone (even non-Rust developers) can instantly identify test files by name alone. No need to open the file to check for `#[cfg(test)]` attributes.
 
 ### Python Example
 

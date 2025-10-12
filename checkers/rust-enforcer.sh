@@ -29,9 +29,12 @@ if [ ! -f "$RUST_FILE" ]; then
     exit 1
 fi
 
-# Detect if this is a test file
+# Detect if this is a test file (strict naming convention)
+# Test files MUST either:
+#   1. Be in tests/ directory (standard Rust convention), OR
+#   2. End with _test.rs (makes tests visually obvious)
 IS_TEST_FILE=0
-if [[ "$RUST_FILE" =~ /tests?/ ]] || [[ "$RUST_FILE" =~ _test\.rs$ ]] || grep -q '#\[cfg(test)\]' "$RUST_FILE" 2>/dev/null; then
+if [[ "$RUST_FILE" =~ /tests?/ ]] || [[ "$RUST_FILE" =~ _test\.rs$ ]]; then
     IS_TEST_FILE=1
 fi
 
