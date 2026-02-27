@@ -4,6 +4,7 @@ set -euo pipefail
 # Post-Write Hook - Validation & Rollback
 # Runs AFTER file is written by AI agents
 # If check fails, file is AUTOMATICALLY REVERTED
+# Shows exact error so you know what to fix
 
 FILE_PATH="$1"
 FILE_EXT="${FILE_PATH##*.}"
@@ -17,7 +18,7 @@ NC='\033[0m'
 HOOK_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 CHECKERS_DIR="$HOOK_DIR/../checkers"
 
-echo -e "${YELLOW}🔍 POST-WRITE VALIDATION: $FILE_PATH${NC}"
+echo -e "${YELLOW}POST-WRITE VALIDATION: $FILE_PATH${NC}"
 
 # Create backup
 if [ -f "$FILE_PATH" ]; then
@@ -51,29 +52,34 @@ case "$FILE_EXT" in
     ENFORCER="$CHECKERS_DIR/markdown-enforcer.sh"
     ;;
   *)
-    echo -e "${YELLOW}⚠️  No enforcer for .$FILE_EXT files${NC}"
+    echo -e "${YELLOW}No enforcer for .$FILE_EXT files${NC}"
     rm -f "$BACKUP_FILE"
     exit 0
     ;;
 esac
 
 # Run validation
-if "$ENFORCER" "$FILE_PATH"; then
-  echo -e "${GREEN}✅ Post-write validation passed${NC}"
+CHECK_OUTPUT=$("$ENFORCER" "$FILE_PATH" 2>&1)
+EXIT_CODE=$?
+
+if [ $EXIT_CODE -eq 0 ]; then
+  echo -e "${GREEN}Validation passed${NC}"
   rm -f "$BACKUP_FILE"
   exit 0
 else
-  echo -e "${RED}❌ VALIDATION FAILED - REVERTING FILE${NC}"
+  echo "$CHECK_OUTPUT" | grep -A2 "CRITICAL\|ERROR" | head -10
+  
+  echo -e "${RED}VALIDATION FAILED - REVERTING FILE${NC}"
 
   # Restore from backup or delete
   if [ -f "$BACKUP_FILE" ]; then
     mv "$BACKUP_FILE" "$FILE_PATH"
-    echo -e "${YELLOW}⏪ File reverted to previous version${NC}"
+    echo -e "${YELLOW}File reverted to previous version${NC}"
   else
     rm -f "$FILE_PATH"
-    echo -e "${YELLOW}🗑️  Invalid file deleted${NC}"
+    echo -e "${YELLOW}Invalid file deleted${NC}"
   fi
 
-  echo -e "${RED}🚫 AI AGENT MUST FIX VIOLATIONS AND RETRY${NC}"
+  echo -e "${RED}Fix the errors and try again${NC}"
   exit 1
 fi
