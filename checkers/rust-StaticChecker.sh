@@ -92,6 +92,7 @@ check_pattern() {
                 echo "   File: $file"
                 echo "   Lines: $line_numbers"
                 ((ERRORS++))
+                EXIT_CODE=1
                 ;;
             warning)
                 echo -e "${YELLOW}⚠️  WARNING${NC}: $description"
@@ -142,6 +143,7 @@ if [[ ! "$RUST_FILE" =~ main\.rs$ ]] && [[ ! "$RUST_FILE" =~ /tests?/ ]] && [[ !
         echo "   Lines: $line_numbers"
         echo "   Use proper logging (tracing, log, etc.) instead"
         ((ERRORS++))
+        EXIT_CODE=1
     fi
 fi
 
