@@ -91,7 +91,11 @@ check_pattern() {
                 echo -e "${RED}❌ ERROR${NC}: $description"
                 echo "   File: $file"
                 echo "   Lines: $line_numbers"
-                ((ERRORS++))
+                ((
+                EXIT_CODE=1
+                ERRORS++
+                EXIT_CODE=1
+            ))
                 EXIT_CODE=1
                 ;;
             warning)
@@ -99,6 +103,7 @@ check_pattern() {
                 echo "   File: $file"
                 echo "   Lines: $line_numbers"
                 ((WARNINGS++))
+                EXIT_CODE=1
                 EXIT_CODE=1
                 ;;
         esac
@@ -119,6 +124,15 @@ if [ $LINE_COUNT -gt 200 ]; then
     EXIT_CODE=1
 fi
 
+
+# Check trailing newlines - must be exactly 1 (EPIC FAIL if wrong)
+newline_count=$(tail -c 1000 "$RUST_FILE" | tr -cd "\n" | wc -c)
+if [[ $newline_count -ne 1 ]]; then
+    echo -e "${RED}🚨 CRITICAL${NC}: File must end with exactly one newline (found: $newline_count)"
+    echo "   File: $RUST_FILE"
+    ((CRITICAL++))
+    EXIT_CODE=1
+fi
 # Check critical patterns
 for desc in "${!CRITICAL_PATTERNS[@]}"; do
     pattern="${CRITICAL_PATTERNS[$desc]}"
@@ -143,7 +157,11 @@ if [[ ! "$RUST_FILE" =~ main\.rs$ ]] && [[ ! "$RUST_FILE" =~ /tests?/ ]] && [[ !
         echo "   File: $RUST_FILE"
         echo "   Lines: $line_numbers"
         echo "   Use proper logging (tracing, log, etc.) instead"
-        ((ERRORS++))
+        ((
+                EXIT_CODE=1
+                EXIT_CODE=1
+                ERRORS++
+            ))
         EXIT_CODE=1
     fi
 fi
@@ -155,6 +173,7 @@ if grep -Pn '^\s*let\s+[a-hln-wA-Z]\s*[=:]' "$RUST_FILE" 2>/dev/null | grep -v '
     echo "   File: $RUST_FILE"
     echo "   Lines: $line_numbers"
     echo "   Use descriptive names (except i,j,k for loops or x,y,z for math)"
+    EXIT_CODE=1
     ((WARNINGS++))
 fi
 
