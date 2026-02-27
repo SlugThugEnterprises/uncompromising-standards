@@ -99,6 +99,7 @@ check_pattern() {
                 echo "   File: $file"
                 echo "   Lines: $line_numbers"
                 ((WARNINGS++))
+                EXIT_CODE=1
                 ;;
         esac
     fi
