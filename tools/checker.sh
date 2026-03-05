@@ -1,75 +1,24 @@
 #!/bin/bash
-# Main checker - does all logic, returns block/allow
-# Reads JSON from stdin, returns exit 0 = allow, exit 1 = deny
+# Main checker - routes to language-specific checkers dynamically
+# Exit 0 = pass, Exit 1+ = fail
 
-set -euo pipefail
+EXT="$1"
+FILE="$2"
 
-# Read input JSON from stdin
-INPUT=$(cat)
-
-TOOL_NAME=$(jq -r '.tool_name // empty' <<< "$INPUT")
-FILE_PATH=$(jq -r '.tool_input.file_path // empty' <<< "$INPUT")
-CONTENT=$(jq -r '.tool_input.content // empty' <<< "$INPUT")
-
-# Only check Write operations
-if [[ "$TOOL_NAME" != "Write" ]]; then
-    exit 0
-fi
-
-# Validate inputs
-if [[ -z "$FILE_PATH" || -z "$CONTENT" ]]; then
-    echo "Missing path or content"
-    exit 1
-fi
-
-# Path validation - block path traversal
-case "$FILE_PATH" in
-    *../*|*/../*|../*|~*) echo "Path traversal not allowed"; exit 1;;
-esac
-
-if [[ "$FILE_PATH" =~ [\$\`\"\'\;\|] ]]; then
-    echo "Invalid characters in path"
-    exit 1
-fi
-
-# Skip hook system files
-case "$FILE_PATH" in
-    hooks/*|tools/*|checkers/*|rules/*|.claude/*) exit 0;;
-esac
-
-# Get extension
-EXT="${FILE_PATH##*.}"
-[[ "$EXT" == "$FILE_PATH" ]] && EXT=""
+# Get script dir (repo root)
+SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)" || { echo "No checker available for extension, blocking by default" >&2; exit 1; }
+CHECKERS_DIR="$SCRIPT_DIR/checkers"
 
 # No extension = allow
 [[ -z "$EXT" ]] && exit 0
 
-# Get repo dir
-REPO_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
-CHECKERS_DIR="$REPO_DIR/checkers"
+# Check if checker exists for this extension
 CHECKER="$CHECKERS_DIR/$EXT.sh"
 
-# No checker = allow (fail-open)
-if [[ ! -x "$CHECKER" ]]; then
-    exit 0
-fi
-
-# Create temp file for checker
-TMP_DIR=$(mktemp -d) || { echo "Failed to create temp dir"; exit 1; }
-trap 'rm -rf "$TMP_DIR"' EXIT
-
-# Sanitize filename - use basename to prevent path traversal
-BASENAME=$(basename "$FILE_PATH")
-TMP_FILE="$TMP_DIR/$BASENAME"
-printf '%s' "$CONTENT" > "$TMP_FILE"
-
-# Run checker - exit 0 = pass, exit 1+ = fail
-if "$CHECKER" "$TMP_FILE" 2>/dev/null; then
-    exit 0
+if [[ -x "$CHECKER" ]]; then
+    # Run the checker
+    exec "$CHECKER" "$FILE"
 else
-    # Checker failed - get reason
-    REASON=$("$CHECKER" "$TMP_FILE" 2>&1 | head -1) || true
-    [[ -z "$REASON" ]] && REASON="Check failed"
-    echo "$REASON"
-    exit 1
+    # No checker for this extension = allow (fail-open)
+    exit 0
 fi
