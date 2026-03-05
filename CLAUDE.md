@@ -11,24 +11,31 @@ This is the "Uncompromising Standards" project - a static code analysis system t
 3. **Rules definitions** (`rules/RULES.*.md`) - Documentation of enforced standards
 
 ## Architecture
-
 ```
+
 /opt/uncompromising-standards/
-├── hooks/pre-write.sh       # Main hook entry point
-├── tools/checker.sh         # Router - dispatches to language-specific checkers
-├── checkers/                # Language-specific checkers
-│   ├── sh.sh               # Bash checker (references missing lib/core.sh and modules/)
-│   └── rs.sh               # Rust checker (standalone, comprehensive)
-└── rules/                   # Rule definitions per language
-    ├── RULES.md            # Universal rules
-    ├── RULES.python.md
-    ├── RULES.javascript.md
-    ├── RULES.bash.md
-    ├── RULES.go.md
-    ├── RULES.rust.md
-    ├── RULES.ruby.md
-    ├── RULES.sql.md
-    └── RULES.markdown.md
+├── checkers
+│   ├── rs.sh
+│   └── sh.sh
+├── hooks
+│   └── pre-write.sh   <--- calls check.sh
+├── install.sh
+├── rules             <-- code rules
+│   ├── RULES.bash.md
+│   ├── RULES.go.md
+│   ├── RULES.javascript.md
+│   ├── RULES.markdown.md
+│   ├── RULES.md
+│   ├── RULES.python.md
+│   ├── RULES.ruby.md
+│   ├── RULES.rust.md
+│   └── RULES.sql.md
+└── tools
+    ├── check.sh    <--  does logic to check code
+
+
+
+
 ```
 
 ## Key Behaviors
@@ -46,6 +53,7 @@ This is the "Uncompromising Standards" project - a static code analysis system t
 | TODO/FIXME/HACK | Any | Block |
 | Secrets | Hardcoded API keys/tokens | Block |
 | Debugger statements | `breakpoint()`, `pdb` | Block |
+
 
 ## Installation
 
