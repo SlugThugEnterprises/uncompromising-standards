@@ -110,18 +110,28 @@ while IFS=: read -r ln _; do
     emit "$RUST_FILE" "$ln" "todo! forbidden"
 done < <(grep -nE '\btodo!\(' <<<"$SANITIZED" || true)
 
-# Check 4: Panic/unwrap/assert sources - ALWAYS forbidden
-while IFS=: read -r ln _; do
-    emit "$RUST_FILE" "$ln" "panic/unwrap/expect/assert forbidden"
+# Check 4: Panic/unwrap/assert sources - ALWAYS forbidden (specific messages)
+while IFS=: read -r ln line; do
+    if echo "$line" | grep -qE '\.unwrap\('; then
+        emit "$RUST_FILE" "$ln" "unwrap() forbidden - use ? or proper error handling"
+    elif echo "$line" | grep -qE '\.expect\('; then
+        emit "$RUST_FILE" "$ln" "expect() forbidden - use ? or proper error handling"
+    elif echo "$line" | grep -qE '\bpanic!\b'; then
+        emit "$RUST_FILE" "$ln" "panic!() forbidden - return Result instead"
+    elif echo "$line" | grep -qE '\bunreachable!\b'; then
+        emit "$RUST_FILE" "$ln" "unreachable!() forbidden"
+    elif echo "$line" | grep -qE '\bassert!\b|\bassert_eq!\b|\bdebug_assert!\b'; then
+        emit "$RUST_FILE" "$ln" "assert macros forbidden"
+    fi
 done < <(grep -nE '\bpanic!\b|\bunreachable!\b|\bassert!\b|\bassert_eq!\b|\bdebug_assert!\b|\.unwrap\(|\.expect\(' <<<"$SANITIZED" || true)
 
-# unwrap_or variants
+# unwrap_or variants (specific messages)
 while IFS=: read -r ln _; do
-    emit "$RUST_FILE" "$ln" "unwrap_or forbidden"
+    emit "$RUST_FILE" "$ln" "unwrap_or() forbidden - handle error explicitly"
 done < <(grep -nE '\.unwrap_or\s*\(' <<<"$SANITIZED" || true)
 
 while IFS=: read -r ln _; do
-    emit "$RUST_FILE" "$ln" "unwrap_or_else forbidden"
+    emit "$RUST_FILE" "$ln" "unwrap_or_else() forbidden - handle error explicitly"
 done < <(grep -nE '\.unwrap_or_else\s*\(' <<<"$SANITIZED" || true)
 
 # Default::default()
@@ -174,12 +184,14 @@ while IFS=: read -r ln _; do
     emit "$RUST_FILE" "$ln" "dyn trait-object misuse in generics"
 done < <(grep -nE '<[[:space:]]*\( *dyn\b|\( *dyn\b[^)]*\) *>' <<<"$SANITIZED" || true)
 
-# Check 12: Single-letter variables (WARNING)
+# Check 12: Single-letter variables (WARNING) - show full context
 while IFS=: read -r ln line; do
     id=$(echo "$line" | sed -nE 's/^\s*let\s+([A-Za-z])\b.*/\1/p')
     [[ -z "$id" ]] && continue
     case "$id" in i|j|k|x|y|z) continue ;; esac
-    emit "$RUST_FILE" "$ln" "single-letter variable '$id' (allowed: i j k x y z)"
+    # Get the full line from original file for context
+    context=$(sed -n "${ln}p" "$RUST_FILE" | sed 's/[[:space:]]*$//')
+    emit "$RUST_FILE" "$ln" "single-letter var '$id' - use descriptive name (e.g., '$id' -> $(echo "$id" | sed -e 's/a/alpha/g' -e 's/b/beta/g' -e 's/c/count/g' -e 's/r/result/g' -e 's/s/source/g' -e 's/t/temp/g'))"
 done < <(grep -nE '^\s*let\s+[A-Za-z]\b' <<<"$SANITIZED" || true)
 
 # Check 14: #![forbid(unsafe_code)] at crate root (must be in first file)
@@ -192,20 +204,41 @@ while IFS=: read -r ln _; do
     emit "$RUST_FILE" "$ln" "dynamic allocation forbidden (vec!/Box/HashMap/Arc/Rc)"
 done < <(grep -nE '\b(vec!|Box::|HashMap::|Arc::|Rc::)\b' <<< "$SANITIZED" || true)
 
-# Check 16: Direct array indexing forbidden
-while IFS=: read -r ln _; do
-    emit "$RUST_FILE" "$ln" "direct array indexing forbidden"
-done < <(grep -nE '\[[0-9]+\]' <<< "$SANITIZED" || true)
+# Check 16: Direct array indexing forbidden (exclude vec! and array literals)
+while IFS=: read -r ln line; do
+    # Skip lines with vec! or array literals
+    if echo "$line" | grep -qE 'vec!|\[\s*\[|='; then
+        continue
+    fi
+    # Extract just the indexing part for context
+    match=$(echo "$line" | grep -oE '\[[0-9]+\]|\[[a-z_][a-z0-9_]*\]' | head -1)
+    [[ -z "$match" ]] && continue
+    emit "$RUST_FILE" "$ln" "direct indexing $match forbidden - use .get() instead"
+done < <(grep -nE '\[[0-9]+\]|\[[a-z_][a-z0-9_]*\]' <<< "$SANITIZED" || true)
 
 # Check 17: Unsafe blocks forbidden
 while IFS=: read -r ln _; do
     emit "$RUST_FILE" "$ln" "unsafe block forbidden"
 done < <(grep -nE '\bunsafe\s*\{' <<< "$SANITIZED" || true)
 
-# Check 18: Bare arithmetic operators forbidden
-while IFS=: read -r ln _; do
-    emit "$RUST_FILE" "$ln" "bare arithmetic operator forbidden"
-done < <(grep -nE ' [+\*/%] | \- ' <<< "$SANITIZED" || true)
+# Check 18: Bare arithmetic operators forbidden - show which operator
+while IFS=: read -r ln line; do
+    # Find which operator was used
+    if echo "$line" | grep -qE '\+'; then
+        op="+"
+    elif echo "$line" | grep -qE '\- '; then
+        op="-"
+    elif echo "$line" | grep -qE '\*'; then
+        op="*"
+    elif echo "$line" | grep -qE '/'; then
+        op="/"
+    elif echo "$line" | grep -qE '%'; then
+        op="%"
+    else
+        op="arithmetic"
+    fi
+    emit "$RUST_FILE" "$ln" "bare '$op' operator forbidden - use .saturating_add()/.saturating_sub() instead"
+done < <(grep -nE ' \+ | \- | \* | / | % ' <<< "$SANITIZED" | grep -vE '^\s*//' || true)
 
 # Check 13: Function length (WARNING)
 echo "$SANITIZED" | awk -v file="$RUST_FILE" -v limit="$MAX_FN_LINES" '

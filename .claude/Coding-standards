@@ -1,0 +1,21 @@
+# Coding Standards
+
+This project uses the uncompromising-standards hook. See: https://github.com/uncompromising-standards
+
+## Key Rules
+
+- No unwrap/expect/panic - use proper error handling
+- No bare arithmetic (+ - * / %) - use .saturating_* methods
+- No direct array indexing - use .get() instead
+- No dynamic allocation (vec!, Box, HashMap, Arc, Rc)
+- No unsafe code
+- Single-letter vars only: i, j, k, x, y, z
+- Max function length: 50 lines
+- Max file length: 200 lines
+
+## Fixing Errors
+
+When the hook blocks a write, the error message will tell you:
+- What pattern is forbidden
+- What line it's on
+- How to fix it (e.g., use .get() instead of [i])

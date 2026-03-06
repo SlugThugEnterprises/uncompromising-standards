@@ -18,6 +18,53 @@ PROJECT_ROOT="$(cd "$SCRIPT_DIR/.." && pwd)"
 CHECKERS_DIR="$PROJECT_ROOT/checkers"
 
 # =============================================================================
+# Check for coding standards file and create if missing
+# =============================================================================
+
+CLAUDE_DIR=".claude"
+STANDARDS_FILE="$CLAUDE_DIR/Coding-standards"
+
+setup_coding_standards() {
+    # Only check when running in actual project context
+    # Skip Claude Code config directories
+    if [[ "$PROJECT_ROOT" == *"/tmp"* ]] || \
+       [[ "$PROJECT_ROOT" == "/root"* ]] || \
+       [[ "$PROJECT_ROOT" == "$HOME/.config"* ]]; then
+        return
+    fi
+
+    # Create .claude directory if it doesn't exist
+    if [[ ! -d "$PROJECT_ROOT/$CLAUDE_DIR" ]]; then
+        mkdir -p "$PROJECT_ROOT/$CLAUDE_DIR"
+    fi
+
+    # Create coding standards file if it doesn't exist
+    if [[ ! -f "$PROJECT_ROOT/$STANDARDS_FILE" ]]; then
+        # Determine which rules file to use based on project files
+        local rules_file=""
+
+        # Check for project type markers in order of specificity
+        if [[ -f "$PROJECT_ROOT/go.mod" ]]; then
+            rules_file="$SCRIPT_DIR/../rules/RULES.go.md"
+        elif [[ -f "$PROJECT_ROOT/package.json" ]]; then
+            rules_file="$SCRIPT_DIR/../rules/RULES.javascript.md"
+        elif [[ -f "$PROJECT_ROOT/Pipfile" ]] || [[ -f "$PROJECT_ROOT/requirements.txt" ]]; then
+            rules_file="$SCRIPT_DIR/../rules/RULES.python.md"
+        elif [[ -f "$PROJECT_ROOT/Cargo.toml" ]]; then
+            rules_file="$SCRIPT_DIR/../rules/RULES.rust.md"
+        else
+            # Default to rust rules (since this hook is primarily for rust)
+            rules_file="$SCRIPT_DIR/../rules/RULES.rust.md"
+        fi
+
+        # Copy the rules file if it exists
+        if [[ -f "$rules_file" ]]; then
+            cp "$rules_file" "$PROJECT_ROOT/$STANDARDS_FILE"
+        fi
+    fi
+}
+
+# =============================================================================
 # Get checker script for file type
 # =============================================================================
 
@@ -37,6 +84,9 @@ get_checker() {
 # =============================================================================
 
 main() {
+    # Setup coding standards file if needed
+    setup_coding_standards
+
     # Read JSON from stdin
     local input
     input=$(cat)
@@ -95,13 +145,14 @@ main() {
         # Check passed - allow
         exit 0
     else
-        # Check failed - format and return concise error message
+        # Check failed - format as proper JSON response
         local formatted
-        formatted=$(echo "$checker_output" | grep -E 'FAIL' | sed 's/.*❌ FAIL.*: //' | sed 's/   File: .*//' | sed 's/\x1b\[[0-9;]*m//g' | head -10 | tr '\n' ', ' | sed 's/,$//')
+        formatted=$(echo "$checker_output" | grep -E '❌ FAIL' | grep -v 'Check FAILED' | sed 's/.*❌ FAIL.*: //' | sed 's/   File: .*//' | sed 's/\x1b\[[0-9;]*m//g' | head -10 | tr '\n' ', ' | sed 's/,$//')
         if [[ -z "$formatted" ]]; then
             formatted="Code standards check failed"
         fi
-        echo "$formatted" >&2
+        # Output JSON to stderr (llxprt-code expects blocking output on stderr)
+        echo "{\"hookSpecificOutput\": {\"hookEventName\": \"PreToolUse\", \"permissionDecision\": \"deny\", \"permissionDecisionReason\": \"$formatted\"}}" >&2
         exit 2
     fi
 }
