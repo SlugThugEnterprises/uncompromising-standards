@@ -65,6 +65,24 @@ setup_coding_standards() {
 }
 
 # =============================================================================
+# Check if file should be bypassed (hook/tooling files)
+# =============================================================================
+
+should_bypass() {
+    local file_path="$1"
+
+    # Directories that bypass validation
+    local bypass_dirs=("hooks" "tools" "checkers" "rules" ".claude")
+
+    for dir in "${bypass_dirs[@]}"; do
+        if [[ "$file_path" == *"/$dir/"* ]] || [[ "$file_path" == *"/$dir" ]] || [[ "$file_path" == "$dir"* ]]; then
+            return 0  # bypass
+        fi
+    done
+    return 1  # don't bypass
+}
+
+# =============================================================================
 # Get checker script for file type
 # =============================================================================
 
@@ -75,6 +93,7 @@ get_checker() {
     case "$ext" in
         rs) echo "$CHECKERS_DIR/rs.sh" ;;
         sh|bash) echo "$CHECKERS_DIR/sh.sh" ;;
+        py) echo "$CHECKERS_DIR/py.sh" ;;
         *) echo "" ;;
     esac
 }
@@ -91,9 +110,9 @@ main() {
     local input
     input=$(cat)
 
-    # Extract tool_name
+    # Extract tool_name (support both Claude Code and LLxprt formats)
     local tool_name
-    tool_name=$(echo "$input" | jq -r '.tool_name // empty')
+    tool_name=$(echo "$input" | jq -r '.tool_name // .tool // empty')
 
     # Only run on Write operations
     case "$tool_name" in
@@ -106,6 +125,11 @@ main() {
     file_path=$(echo "$input" | jq -r '.tool_input.file_path // .tool_input.path // empty')
 
     if [[ -z "$file_path" ]]; then
+        exit 0
+    fi
+
+    # Check if file should bypass validation
+    if should_bypass "$file_path"; then
         exit 0
     fi
 
@@ -147,11 +171,15 @@ main() {
     else
         # Check failed - format as proper JSON response
         local formatted
-        formatted=$(echo "$checker_output" | grep -E '❌ FAIL' | grep -v 'Check FAILED' | sed 's/.*❌ FAIL.*: //' | sed 's/   File: .*//' | sed 's/\x1b\[[0-9;]*m//g' | head -10 | tr '\n' ', ' | sed 's/,$//')
+        formatted=$(echo "$checker_output" | "$SCRIPT_DIR/format-error.sh")
         if [[ -z "$formatted" ]]; then
             formatted="Code standards check failed"
         fi
-        # Output JSON to stderr (llxprt-code expects blocking output on stderr)
+        # LLxprt expects deny on stdout
+        if [[ "$input" == *'"tool"'* ]]; then
+            echo "{\"decision\": \"deny\", \"reason\": \"$formatted\"}"
+        fi
+        # Claude Code expects deny on stderr
         echo "{\"hookSpecificOutput\": {\"hookEventName\": \"PreToolUse\", \"permissionDecision\": \"deny\", \"permissionDecisionReason\": \"$formatted\"}}" >&2
         exit 2
     fi

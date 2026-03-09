@@ -1,37 +1,100 @@
-# Python Rules Reference
+# Python A+ Coding Standard
 
-When triggered, error format:
+This project enforces strict Python quality rules based on the A+ Coding Standard.
+
+## Non-Negotiable Rules
+
+| Rule | Description | How to Fix |
+|------|-------------|------------|
+| `file-length` | File exceeds 300 lines | Split into modules |
+| `function-length` | Function exceeds 50 lines | Refactor into smaller functions |
+| `todo` | TODO/FIXME/HACK/XXX/TEMP/WIP/PLACEHOLDER | Complete the code or remove comment |
+| `bare_except` | Bare `except:` found | Use `except SpecificException:` |
+| `silent_failure` | `except: pass` or `except Exception: pass` | Handle the exception properly |
+| `secret_*` | Hardcoded API key/password/token/secret | Use env vars or secrets manager |
+| `print_in_code` | `print()` in business logic | Use `logging` module |
+| `debug_breakpoint` | `breakpoint()`, `pdb.set_trace()` | Remove before committing |
+
+## Type Safety
+
+| Rule | Description | How to Fix |
+|------|-------------|------------|
+| `missing_return_type` | Public function missing return type | Add `-> Type` annotation |
+| `missing_param_type` | Public function missing parameter type | Add `: Type` annotations |
+| `any_type` | Using `Any` type | Use specific types |
+
+## Function Rules
+
+| Rule | Description | How to Fix |
+|------|-------------|------------|
+| `excessive_params` | More than 5 parameters | Use dataclass or split function |
+| `nested_loops` | Deeply nested loops (3+) | Extract to separate function |
+
+## Style Rules
+
+| Rule | Description | How to Fix |
+|------|-------------|------------|
+| `single_letter_var` | Single-letter variable (except i,j,k,x,y,z) | Use descriptive name |
+| `bad_name` | Ambiguous name (data, thing, stuff, obj, temp) | Use descriptive name |
+| `magic_number` | Magic number without explanation | Extract to named constant |
+| `compare_none` | Using `== None` instead of `is None` | Use `is None` |
+
+## Error Handling
+
+```python
+# Good
+try:
+    result = client.lookup(address)
+except TimeoutError as exc:
+    raise AddressLookupError("Address lookup timed out") from exc
+
+# Bad
+try:
+    result = client.lookup(address)
+except:
+    pass
 ```
-[SEVERITY] - [RULE_NAME] - Line [NUMBER]
+
+## Naming Conventions
+
+- **Nouns for data**: `user`, `invoice`, `total_amount`
+- **Verbs for actions**: `get_user()`, `calculate_total()`
+- **Booleans**: `is_valid`, `has_access`, `can_retry`
+- **Allowed single-letter**: `i`, `j`, `k` for loops only
+- **Forbidden**: `data`, `thing`, `stuff`, `obj`, `temp`, `do`, `handle`
+
+## Project Structure
+
+```
+project/
+  pyproject.toml
+  src/project_name/
+    __init__.py
+    config.py
+    models.py
+    services/
+    repositories/
+  tests/
+    unit/
+    integration/
 ```
 
-## CRITICAL (blocks write)
+## Quality Gate
 
-| Rule | Line | What Triggered It | How to Fix |
-|------|------|------------------|------------|
-| `file-length` | - | File exceeds 200 lines | Split into modules or add `# standards-disable: file-length` |
-| `function-length` | - | Function exceeds 50 lines | Refactor or add `# standards-disable: function-length` |
-| `bare_except` | # | Bare `except:` found | Use `except Exception as e:` or specific type |
-| `todo` | # | TODO/FIXME/HACK/XXX/TEMP/WIP/PLACEHOLDER | Remove placeholder comments |
-| `pass_placeholder` | # | Empty `pass` statement | Implement the function |
-| `debug_breakpoint` | # | `breakpoint()`, `pdb.set_trace`, `import pdb` | Remove before committing |
-| `secret_*` | # | Hardcoded API key/password/token | Use env vars or secrets manager |
+Run these before committing (use `ruff` for speed):
 
-## ERROR (blocks write)
+```bash
+# Fast: format + lint (replaces black + flake8)
+ruff format --check .
+ruff check .
 
-| Rule | Line | What Triggered It | How to Fix |
-|------|------|------------------|------------|
-| `print_not_main` | # | `print()` outside `__main__` or tests | Use `logging` module |
-| `exec_usage` | # | `exec()` function | Avoid dynamic code |
-| `eval_usage` | # | `eval()` function | Avoid dynamic code |
-| `import_wildcard` | # | `from X import *` | Import specific names |
-| `compare_none` | # | `== None` or `is not None` | Use `is None` (PEP 8) |
+# Tests
+pytest
 
-## WARNING (informational)
+# Manual (too slow for pre-commit): mypy --strict
+```
 
-| Rule | Line | What Triggered It | How to Fix |
-|------|------|------------------|------------|
-| `single-letter-var` | # | Single-letter variable | Use descriptive names (allowed: i,j,k,x,y,z) |
+**Note**: `ruff format` is a 30-100x faster drop-in replacement for Black.
 
 ## Exceptions
 
