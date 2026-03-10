@@ -41,7 +41,7 @@ run_test "rust_fail_todo.rs FAIL" 1 "$CHECKERS_DIR/rs.sh" "$SCRIPT_DIR/rust_fail
 echo ""
 echo "Testing Python Checker"
 run_test "py_pass.py PASS" 0 "$CHECKERS_DIR/py.sh" "$SCRIPT_DIR/py_pass.py"
-run_test "py_fail_notype.py FAIL" 2 "$CHECKERS_DIR/py.sh" "$SCRIPT_DIR/py_fail_notype.py"
+run_test "py_fail_notype.py FAIL" 1 "$CHECKERS_DIR/py.sh" "$SCRIPT_DIR/py_fail_notype.py"
 
 echo ""
 echo "Testing Bash Checker"

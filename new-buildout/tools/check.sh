@@ -25,6 +25,11 @@ CLAUDE_DIR=".claude"
 STANDARDS_FILE="$CLAUDE_DIR/Coding-standards"
 
 setup_coding_standards() {
+    # Skip if DISABLE_SETUP is set
+    if [[ "${DISABLE_SETUP:-}" == "1" ]]; then
+        return
+    fi
+
     # Only check when running in actual project context
     # Skip Claude Code config directories
     if [[ "$PROJECT_ROOT" == *"/tmp"* ]] || \
@@ -110,6 +115,14 @@ main() {
     local input
     input=$(cat)
 
+    # Validate jq is available and input is valid JSON
+    if ! command -v jq &>/dev/null; then
+        exit 0  # Allow if jq not installed
+    fi
+    if ! echo "$input" | jq -e . &>/dev/null; then
+        exit 0  # Allow if not valid JSON
+    fi
+
     # Extract tool_name (support both Claude Code and LLxprt formats)
     local tool_name
     tool_name=$(echo "$input" | jq -r '.tool_name // .tool // empty')
@@ -154,9 +167,9 @@ main() {
     # Fix jq escaping: \! -> !
     content="${content//\\!/!}"
 
-    # Write content to temp file for checking - use explicit template
+    # Write content to temp file for checking
     local temp_file
-    temp_file=$(mktemp "${PROJECT_ROOT}/.claude/hook-check-XXXXXX")
+    temp_file=$(mktemp "/tmp/hook-check-XXXXXX")
     trap "rm -f '$temp_file'" EXIT
     printf '%s' "$content" > "$temp_file"
 

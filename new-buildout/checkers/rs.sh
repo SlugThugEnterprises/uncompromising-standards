@@ -11,9 +11,6 @@ set -uo pipefail
 # Enhanced with sanitization and balance checking from DO-NOT-EDIT checker
 
 EXIT_CODE=0
-WARNINGS=0
-ERRORS=0
-CRITICAL=0
 
 # Color output
 RED='\033[0;31m'
@@ -22,9 +19,8 @@ GREEN='\033[0;32m'
 NC='\033[0m'
 
 # Configuration
-MAX_FILE_LINES=200
+MAX_FILE_LINES=100
 MAX_FN_LINES=50
-DOC_LOOKBACK=3
 
 # Check if file provided
 if [ $# -eq 0 ]; then
@@ -43,34 +39,14 @@ fi
 # SANITIZATION: Strip comments and strings to avoid false positives
 # =============================================================================
 sanitize_rs() {
-    # Strip line comments, block comments (including multiline), doc comments, strings, and chars
-    # Use awk for more robust multiline comment handling
-    awk '{
-        # Remove line comments (// ...) - but not URLs like http://
-        gsub(/(^|[^:])(\/\/)[^\n]*/, " ")
-        # Remove doc comments (/// ...) but preserve /// for attributes
-        gsub(/(^|[^#])\/\/\/ /, " ")
-        # Remove block comments (/* ... */) including multiline
-        while (match($0, /\/\*/)) {
-            start = RSTART
-            end = match($0, /\*\//)
-            if (end > 0) {
-                $0 = substr($0, 1, start-1) " " substr($0, end+2)
-            } else {
-                $0 = substr($0, 1, start-1)
-                break
-            }
-        }
-        # Remove doc block comments (/** ... */)
-        while (match($0, /\/\*\*[^*]*\*+([^\/*][^*]*\*+)*\//)) {
-            $0 = substr($0, 1, RSTART-1) " " substr($0, RLENGTH+1)
-        }
-        # Replace string literals with placeholder
-        gsub(/"[^"\\]*(\\.[^"\\]*)*"/, "__STR__")
-        # Replace char literals with placeholder
-        gsub(/'[^'\\]*(\\.[^'\\]*)*'/, "__CHAR__")
-        print
-    }'
+    # Strip comments and strings to avoid false positives
+    # Handle multiline comments by joining lines first
+    paste -sd ' ' | \
+    sed -e 's://.*$::g' \
+        -e ':a;N;$!ba;s:/\*.*\*/:__BLK__:g' \
+        -e 's:"[^"\\]*\\.":__STR__:g' \
+        -e 's:"[^"]*":__STR__:g' \
+        -e "s:'[^']*':__CHAR__:g"
 }
 
 # =============================================================================
@@ -97,10 +73,12 @@ echo "━━━━━━━━━━━━━━━━━━━━━━━━�
 # Get sanitized content (without strings/comments)
 SANITIZED=$(sanitize_rs < "$RUST_FILE")
 
-# Check 1: File length
-LINE_COUNT=$(wc -l < "$RUST_FILE")
-if [ $LINE_COUNT -gt $MAX_FILE_LINES ]; then
-    emit "$RUST_FILE" 0 "File exceeds $MAX_FILE_LINES lines ($LINE_COUNT lines)"
+# Check 1: File length (code only, not comments)
+# Count lines that aren't just whitespace or // comments
+TOTAL_LINES=$(wc -l < "$RUST_FILE")
+CODE_LINES=$(grep -cvE '^\s*$|^\s*//' "$RUST_FILE" || echo "$TOTAL_LINES")
+if [ "$CODE_LINES" -gt "$MAX_FILE_LINES" ]; then
+    emit "$RUST_FILE" 0 "File exceeds $MAX_FILE_LINES lines of code ($CODE_LINES lines, $TOTAL_LINES total)"
 fi
 
 # Check 2: Balance (braces, parens, brackets)
@@ -206,26 +184,30 @@ while IFS=: read -r ln _; do
 done < <(grep -nE '<[[:space:]]*\( *dyn\b|\( *dyn\b[^)]*\) *>' <<<"$SANITIZED" || true)
 
 # Check 12: Single-letter variables (WARNING) - show full context
+# Allow single-letter vars in for loops: for i in, for j in, etc.
 while IFS=: read -r ln line; do
     id=$(echo "$line" | sed -nE 's/^\s*let\s+([A-Za-z])\b.*/\1/p')
     [[ -z "$id" ]] && continue
+    # Allow i, j, k, x, y, z everywhere
     case "$id" in i|j|k|x|y|z) continue ;; esac
-    # Get the full line from original file for context
-    context=$(sed -n "${ln}p" "$RUST_FILE" | sed 's/[[:space:]]*$//')
+    # Allow single-letter vars in for loops: for i in 0..10, for item in items
+    if echo "$line" | grep -qE '^\s*for\s+[a-z]\b'; then
+        continue
+    fi
     emit "$RUST_FILE" "$ln" "single-letter var '$id' - use descriptive name (e.g., '$id' -> $(echo "$id" | sed -e 's/a/alpha/g' -e 's/b/beta/g' -e 's/c/count/g' -e 's/r/result/g' -e 's/s/source/g' -e 's/t/temp/g'))"
 done < <(grep -nE '^\s*let\s+[A-Za-z]\b' <<<"$SANITIZED" || true)
 
-# Check 14: #![forbid(unsafe_code)] at crate root (must be in first file)
+# Check 13: #![forbid(unsafe_code)] at crate root (must be in first file)
 if ! head -5 "$RUST_FILE" | grep -q '^#!\[forbid(unsafe_code)\]'; then
     emit "$RUST_FILE" 0 "Missing #![forbid(unsafe_code)] at crate root"
 fi
 
-# Check 15: Dynamic allocation forbidden (vec!, Box, HashMap, Arc, Rc)
+# Check 14: Dynamic allocation forbidden (vec!, Box, HashMap, Arc, Rc)
 while IFS=: read -r ln _; do
     emit "$RUST_FILE" "$ln" "dynamic allocation forbidden (vec!/Box/HashMap/Arc/Rc)"
 done < <(grep -nE '\b(vec!|Box::|HashMap::|Arc::|Rc::)\b' <<< "$SANITIZED" || true)
 
-# Check 16: Direct array indexing forbidden (exclude vec!, array literals, and 2D access)
+# Check 15: Direct array indexing forbidden (exclude vec!, array literals, and 2D access)
 while IFS=: read -r ln line; do
     # Skip lines with vec! macro
     if echo "$line" | grep -qE 'vec!'; then
@@ -245,12 +227,12 @@ while IFS=: read -r ln line; do
     emit "$RUST_FILE" "$ln" "direct indexing $match forbidden - use .get() instead"
 done < <(grep -nE '\[[0-9]+\]|\[[a-z_][a-z0-9_]*\]' <<< "$SANITIZED" || true)
 
-# Check 17: Unsafe blocks forbidden
+# Check 16: Unsafe blocks forbidden
 while IFS=: read -r ln _; do
     emit "$RUST_FILE" "$ln" "unsafe block forbidden"
 done < <(grep -nE '\bunsafe\s*\{' <<< "$SANITIZED" || true)
 
-# Check 18: Bare arithmetic operators forbidden - show which operator
+# Check 17: Bare arithmetic operators forbidden - show which operator
 # Match operators with or without surrounding spaces (but not -> or =>)
 while IFS=: read -r ln line; do
     # Find which operator was used - check for -> or => first (not arithmetic)
@@ -273,7 +255,7 @@ while IFS=: read -r ln line; do
     emit "$RUST_FILE" "$ln" "bare '$op' operator forbidden - use .saturating_add()/.saturating_sub() instead"
 done < <(grep -nE '(?<![a-zA-Z0-9_])[\+\-\*/%](?![a-zA-Z0-9_])' <<< "$SANITIZED" | grep -vE '^\s*//' || true)
 
-# Check 13: Function length (WARNING)
+# Check 18: Function length (WARNING)
 echo "$SANITIZED" | awk -v file="$RUST_FILE" -v limit="$MAX_FN_LINES" '
 function start_fn(line) { return (line ~ /(^|[[:space:]])fn[[:space:]]+[A-Za-z0-9_]+/) }
 BEGIN { in_fn=0; depth=0; start=0; }
@@ -300,9 +282,6 @@ BEGIN { in_fn=0; depth=0; start=0; }
     ln=$(echo "$line" | cut -d: -f2)
     emit "$RUST_FILE" "$ln" "function too long"
 done
-
-# Check 14: Public items missing docs (WARNING)
-# This is complex, so we skip for performance - could be added later
 
 echo "━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━"
 

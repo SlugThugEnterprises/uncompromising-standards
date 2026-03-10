@@ -99,4 +99,4 @@ fi
 
 echo "━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━"
 [[ $critical -eq 0 ]] && echo -e "${GREEN}✅ Check passed!${NC}" || echo -e "${RED}❌ Check FAILED${NC}"
-exit $critical
+[[ $critical -eq 0 ]] && exit 0 || exit 1

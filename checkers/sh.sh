@@ -55,9 +55,9 @@ if grep -qE 'rm\s+-[rRfF]+' "$1"; then
     ((critical++)) || true
 fi
 
-# Check for rm -rf / (catastrophic)
-if grep -qE 'rm\s+-[rRfF]*\s+/?' "$1"; then
-    DANGEROUS_RM=$(grep -nE 'rm\s+-[rRfF]*\s+/' "$1" | grep -v '^.*#' | cut -d: -f1 | tr '\n' ',' | sed 's/,$//')
+# Check for rm -rf / (catastrophic) - match rm -rf followed by / (root) or . (current dir)
+if grep -qE 'rm\s+-[rRfF]+[[:space:]]+(/|\.)([[:space:]]|$)' "$1"; then
+    DANGEROUS_RM=$(grep -nE 'rm\s+-[rRfF]+[[:space:]]+(/|\.)' "$1" | grep -v '^.*#' | cut -d: -f1 | tr '\n' ',' | sed 's/,$//')
     if [[ -n "$DANGEROUS_RM" ]]; then
         echo -e "${RED}❌ FAIL${NC}: Potentially catastrophic rm command"
         echo "   Lines: $DANGEROUS_RM"

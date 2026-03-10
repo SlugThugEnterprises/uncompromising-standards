@@ -22,7 +22,7 @@ GREEN='\033[0;32m'
 NC='\033[0m'
 
 # Configuration
-MAX_FILE_LINES=200
+MAX_FILE_LINES=100
 MAX_FN_LINES=50
 DOC_LOOKBACK=3
 
@@ -43,34 +43,14 @@ fi
 # SANITIZATION: Strip comments and strings to avoid false positives
 # =============================================================================
 sanitize_rs() {
-    # Strip line comments, block comments (including multiline), doc comments, strings, and chars
-    # Use awk for more robust multiline comment handling
-    awk '{
-        # Remove line comments (// ...) - but not URLs like http://
-        gsub(/(^|[^:])(\/\/)[^\n]*/, " ")
-        # Remove doc comments (/// ...) but preserve /// for attributes
-        gsub(/(^|[^#])\/\/\/ /, " ")
-        # Remove block comments (/* ... */) including multiline
-        while (match($0, /\/\*/)) {
-            start = RSTART
-            end = match($0, /\*\//)
-            if (end > 0) {
-                $0 = substr($0, 1, start-1) " " substr($0, end+2)
-            } else {
-                $0 = substr($0, 1, start-1)
-                break
-            }
-        }
-        # Remove doc block comments (/** ... */)
-        while (match($0, /\/\*\*[^*]*\*+([^\/*][^*]*\*+)*\//)) {
-            $0 = substr($0, 1, RSTART-1) " " substr($0, RLENGTH+1)
-        }
-        # Replace string literals with placeholder
-        gsub(/"[^"\\]*(\\.[^"\\]*)*"/, "__STR__")
-        # Replace char literals with placeholder
-        gsub(/'[^'\\]*(\\.[^'\\]*)*'/, "__CHAR__")
-        print
-    }'
+    # Strip comments and strings to avoid false positives
+    # Handle multiline comments by joining lines first
+    paste -sd ' ' | \
+    sed -e 's://.*$::g' \
+        -e ':a;N;$!ba;s:/\*.*\*/:__BLK__:g' \
+        -e 's:"[^"\\]*\\.":__STR__:g' \
+        -e 's:"[^"]*":__STR__:g' \
+        -e "s:'[^']*':__CHAR__:g"
 }
 
 # =============================================================================
@@ -97,10 +77,12 @@ echo "━━━━━━━━━━━━━━━━━━━━━━━━�
 # Get sanitized content (without strings/comments)
 SANITIZED=$(sanitize_rs < "$RUST_FILE")
 
-# Check 1: File length
-LINE_COUNT=$(wc -l < "$RUST_FILE")
-if [ $LINE_COUNT -gt $MAX_FILE_LINES ]; then
-    emit "$RUST_FILE" 0 "File exceeds $MAX_FILE_LINES lines ($LINE_COUNT lines)"
+# Check 1: File length (code only, not comments)
+# Count lines that aren't just whitespace or // comments
+TOTAL_LINES=$(wc -l < "$RUST_FILE")
+CODE_LINES=$(grep -cvE '^\s*$|^\s*//' "$RUST_FILE" || echo "$TOTAL_LINES")
+if [ "$CODE_LINES" -gt "$MAX_FILE_LINES" ]; then
+    emit "$RUST_FILE" 0 "File exceeds $MAX_FILE_LINES lines of code ($CODE_LINES lines, $TOTAL_LINES total)"
 fi
 
 # Check 2: Balance (braces, parens, brackets)
@@ -206,10 +188,16 @@ while IFS=: read -r ln _; do
 done < <(grep -nE '<[[:space:]]*\( *dyn\b|\( *dyn\b[^)]*\) *>' <<<"$SANITIZED" || true)
 
 # Check 12: Single-letter variables (WARNING) - show full context
+# Allow single-letter vars in for loops: for i in, for j in, etc.
 while IFS=: read -r ln line; do
     id=$(echo "$line" | sed -nE 's/^\s*let\s+([A-Za-z])\b.*/\1/p')
     [[ -z "$id" ]] && continue
+    # Allow i, j, k, x, y, z everywhere
     case "$id" in i|j|k|x|y|z) continue ;; esac
+    # Allow single-letter vars in for loops: for i in 0..10, for item in items
+    if echo "$line" | grep -qE '^\s*for\s+[a-z]\b'; then
+        continue
+    fi
     # Get the full line from original file for context
     context=$(sed -n "${ln}p" "$RUST_FILE" | sed 's/[[:space:]]*$//')
     emit "$RUST_FILE" "$ln" "single-letter var '$id' - use descriptive name (e.g., '$id' -> $(echo "$id" | sed -e 's/a/alpha/g' -e 's/b/beta/g' -e 's/c/count/g' -e 's/r/result/g' -e 's/s/source/g' -e 's/t/temp/g'))"

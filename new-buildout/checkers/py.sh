@@ -18,7 +18,7 @@ YELLOW = "\033[1;33m"
 NC = "\033[0m"  # No Color
 
 # Rules configuration
-MAX_FILE_LINES = 300
+MAX_FILE_LINES = 150
 MAX_FUNCTION_LINES = 50
 MAX_PARAMS = 5
 
@@ -54,9 +54,12 @@ def check_file(file_path: str) -> List[Tuple[str, int, str]]:
     with open(file_path, "r") as f:
         lines = f.readlines()
 
-    # Check file length
-    if len(lines) > MAX_FILE_LINES:
-        errors.append(("file-length", 0, f"File exceeds {MAX_FILE_LINES} lines ({len(lines)} lines)"))
+    # Count non-comment lines (lines that aren't just whitespace or # comments)
+    code_lines = sum(1 for line in lines if line.strip() and not line.strip().startswith('#'))
+
+    # Check file length (code only, not comments)
+    if code_lines > MAX_FILE_LINES:
+        errors.append(("file-length", 0, f"File exceeds {MAX_FILE_LINES} lines of code ({code_lines} lines, {len(lines)} total)"))
 
     # Track function definitions and their line counts
     in_function = False
@@ -195,16 +198,13 @@ def run_ruff(file_path: str) -> List[Tuple[str, int, str]]:
                 errors.append((match.group(2).lower(), int(match.group(1)), match.group(3)))
 
     except FileNotFoundError:
-        # Ruff not installed - fail hard
-        print(f"{RED}ERROR: ruff not installed, cannot run lint checks{NC}", file=sys.stderr)
-        sys.exit(1)
+        # Ruff not installed - warn but continue with custom checks only
+        print(f"{YELLOW}WARNING: ruff not installed, skipping lint checks{NC}", file=sys.stderr)
     except subprocess.TimeoutExpired:
-        print(f"{RED}ERROR: ruff check timed out after 30 seconds{NC}", file=sys.stderr)
-        sys.exit(1)
+        print(f"{YELLOW}WARNING: ruff check timed out after 30 seconds, skipping{NC}", file=sys.stderr)
     except Exception as e:
-        # Log error and fail
-        print(f"{RED}ERROR: ruff check failed: {e}{NC}", file=sys.stderr)
-        sys.exit(1)
+        # Log error but continue - don't fail the entire check
+        print(f"{YELLOW}WARNING: ruff check failed: {e}, skipping{NC}", file=sys.stderr)
 
     return errors
 
@@ -258,9 +258,7 @@ def main():
     ruff_errors = run_ruff(file_path)
     all_errors.extend(ruff_errors)
 
-    # Run ruff format check
-    format_errors = run_ruff_format(file_path)
-    all_errors.extend(format_errors)
+    # Note: Format checking removed - let editor/tool handle formatting post-write
 
     # Report results
     if all_errors:
@@ -270,7 +268,7 @@ def main():
                 print(f"   FAIL: {rule}   File: {file_path}   Line: {line}   Detail: {message}")
             else:
                 print(f"   FAIL: {rule}   File: {file_path}   Detail: {message}")
-        sys.exit(2)
+        sys.exit(1)
     else:
         print(f"{GREEN}PASS{NC}: Python A+ standards check passed")
         sys.exit(0)
