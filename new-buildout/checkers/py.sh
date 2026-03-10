@@ -195,13 +195,16 @@ def run_ruff(file_path: str) -> List[Tuple[str, int, str]]:
                 errors.append((match.group(2).lower(), int(match.group(1)), match.group(3)))
 
     except FileNotFoundError:
-        # Ruff not installed - emit a warning but continue
-        print(f"{YELLOW}WARNING: ruff not installed, skipping lint checks{NC}", file=sys.stderr)
+        # Ruff not installed - fail hard
+        print(f"{RED}ERROR: ruff not installed, cannot run lint checks{NC}", file=sys.stderr)
+        sys.exit(1)
     except subprocess.TimeoutExpired:
-        print(f"{YELLOW}WARNING: ruff check timed out, skipping{NC}", file=sys.stderr)
+        print(f"{RED}ERROR: ruff check timed out after 30 seconds{NC}", file=sys.stderr)
+        sys.exit(1)
     except Exception as e:
-        # Log error but don't fail silently - this could indicate a real problem
-        print(f"{YELLOW}WARNING: ruff check failed: {e}{NC}", file=sys.stderr)
+        # Log error and fail
+        print(f"{RED}ERROR: ruff check failed: {e}{NC}", file=sys.stderr)
+        sys.exit(1)
 
     return errors
 
@@ -220,13 +223,16 @@ def run_ruff_format(file_path: str) -> List[Tuple[str, int, str]]:
         if result.returncode != 0:
             errors.append(("format", 0, "File not formatted (AI should format content before writing)"))
     except FileNotFoundError:
-        # Ruff not installed - emit a warning but continue
-        print(f"{YELLOW}WARNING: ruff not installed, skipping format checks{NC}", file=sys.stderr)
+        # Ruff not installed - fail hard
+        print(f"{RED}ERROR: ruff not installed, cannot run format checks{NC}", file=sys.stderr)
+        sys.exit(1)
     except subprocess.TimeoutExpired:
-        print(f"{YELLOW}WARNING: ruff format timed out, skipping{NC}", file=sys.stderr)
+        print(f"{RED}ERROR: ruff format timed out after 10 seconds{NC}", file=sys.stderr)
+        sys.exit(1)
     except Exception as e:
-        # Log error but don't fail silently
-        print(f"{YELLOW}WARNING: ruff format check failed: {e}{NC}", file=sys.stderr)
+        # Log error and fail
+        print(f"{RED}ERROR: ruff format check failed: {e}{NC}", file=sys.stderr)
+        sys.exit(1)
 
     return errors
 

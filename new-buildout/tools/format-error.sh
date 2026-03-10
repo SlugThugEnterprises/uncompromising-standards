@@ -7,12 +7,10 @@
 
 set -uo pipefail
 
-# Read stdin safely
-local input
+# Read stdin safely and format
 input=$(cat)
 
 # Extract FAIL lines, clean them up, format nicely
-local formatted
 formatted=$(echo "$input" | grep -E 'FAIL' | grep -v 'Check FAILED' | sed 's/.*FAIL.*: //' | sed 's/   File: .*//' | sed 's/\x1b\[[0-9;]*m//g')
 
 if [[ -z "$formatted" ]]; then
