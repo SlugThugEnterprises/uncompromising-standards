@@ -1,81 +1,110 @@
-#!/bin/bash
+#!/usr/bin/env bash
 set -euo pipefail
 
-# Uncompromising Standards - Installer
-# Installs pre-write hooks to Claude Code for static code analysis
+SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 
-echo "Uncompromising Standards Installer"
-echo "===================================="
-echo ""
+CLAUDE_DIR="$HOME/.claude"
+CLAUDE_SETTINGS_FILE="$CLAUDE_DIR/settings.json"
+CLAUDE_HOOK_COMMAND="$SCRIPT_DIR/hooks/pre-write.sh"
 
-# Check dependencies
-for cmd in jq curl; do
-    if ! command -v "$cmd" &> /dev/null; then
-        echo "Error: $cmd is required but not installed"
+OPENCODE_CONFIG_DIR="$HOME/.config/opencode"
+OPENCODE_CONFIG_FILE="$OPENCODE_CONFIG_DIR/opencode.json"
+OPENCODE_PLUGIN_DIR="$OPENCODE_CONFIG_DIR/plugins"
+OPENCODE_PLUGIN_FILE="$OPENCODE_PLUGIN_DIR/uncompromising-standards.js"
+OPENCODE_PLUGIN_TEMPLATE="$SCRIPT_DIR/integrations/opencode/uncompromising-standards.js"
+
+backup_file() {
+    local file_path="$1"
+
+    if [[ -f "$file_path" ]]; then
+        cp "$file_path" "$file_path.backup"
+    fi
+}
+
+install_claude_code() {
+    local hook_json=""
+
+    mkdir -p "$CLAUDE_DIR"
+    hook_json=$(jq -n \
+        --arg command "$CLAUDE_HOOK_COMMAND" \
+        '{matcher: "Write", hooks: [{type: "command", command: $command}]}')
+
+    if [[ ! -f "$CLAUDE_SETTINGS_FILE" ]]; then
+        jq -n --argjson hook "$hook_json" '{hooks: {PreToolUse: [$hook]}}' > "$CLAUDE_SETTINGS_FILE"
+        echo "Created $CLAUDE_SETTINGS_FILE"
+        return
+    fi
+
+    backup_file "$CLAUDE_SETTINGS_FILE"
+
+    jq \
+        --arg command "$CLAUDE_HOOK_COMMAND" \
+        --argjson hook "$hook_json" \
+        '
+        .hooks = (.hooks // {}) |
+        .hooks.PreToolUse = (
+            (.hooks.PreToolUse // [])
+            | if any(.[]?; .matcher == "Write" and any(.hooks[]?; .type == "command" and .command == $command))
+              then .
+              else . + [$hook]
+              end
+        )
+        ' \
+        "$CLAUDE_SETTINGS_FILE" > "$CLAUDE_SETTINGS_FILE.tmp"
+
+    mv "$CLAUDE_SETTINGS_FILE.tmp" "$CLAUDE_SETTINGS_FILE"
+    echo "Updated $CLAUDE_SETTINGS_FILE"
+}
+
+ensure_opencode_config() {
+    mkdir -p "$OPENCODE_CONFIG_DIR"
+
+    if [[ ! -f "$OPENCODE_CONFIG_FILE" ]]; then
+        jq -n '{"$schema": "https://opencode.ai/config.json"}' > "$OPENCODE_CONFIG_FILE"
+        echo "Created $OPENCODE_CONFIG_FILE"
+    fi
+}
+
+render_opencode_plugin() {
+    mkdir -p "$OPENCODE_PLUGIN_DIR"
+    backup_file "$OPENCODE_PLUGIN_FILE"
+
+    sed "s|__UNCOMPROMISING_STANDARDS_ROOT__|$SCRIPT_DIR|g" \
+        "$OPENCODE_PLUGIN_TEMPLATE" > "$OPENCODE_PLUGIN_FILE"
+
+    echo "Installed $OPENCODE_PLUGIN_FILE"
+}
+
+main() {
+    if ! command -v jq >/dev/null 2>&1; then
+        echo "Error: jq is required but not installed"
         exit 1
     fi
-done
 
-# Settings file location
-SETTINGS_FILE="$HOME/.claude/settings.json"
-mkdir -p "$HOME/.claude"
-
-# Hook URL - change to your server IP when ready to move
-HOOK_URL="http://127.0.0.1:31337/check"
-
-echo "Using HTTP hook: $HOOK_URL"
-
-# Build our hook configuration
-OUR_HOOK=$(jq -n \
-    --arg url "$HOOK_URL" \
-    '{
-        matcher: "Write",
-        hooks: [{
-            type: "http",
-            url: $url
-        }]
-    }')
-
-if [[ -f "$SETTINGS_FILE" ]]; then
-    # Backup existing settings
-    cp "$SETTINGS_FILE" "$SETTINGS_FILE.backup"
-    echo "Backed up existing settings.json to settings.json.backup"
-
-    # Check if PreToolUse hooks already exist
-    if jq -e '.hooks.PreToolUse' "$SETTINGS_FILE" > /dev/null 2>&1; then
-        echo "Existing PreToolUse hooks found, appending our hook..."
-        jq --argjson hook "$OUR_HOOK" \
-            '.hooks.PreToolUse += [$hook]' \
-            "$SETTINGS_FILE" > "$SETTINGS_FILE.tmp"
-        mv "$SETTINGS_FILE.tmp" "$SETTINGS_FILE"
-    else
-        if jq -e '.hooks' "$SETTINGS_FILE" > /dev/null 2>&1; then
-            jq --argjson hook "$OUR_HOOK" \
-                '.hooks.PreToolUse = [$hook]' \
-                "$SETTINGS_FILE" > "$SETTINGS_FILE.tmp"
-            mv "$SETTINGS_FILE.tmp" "$SETTINGS_FILE"
-        else
-            jq --argjson hook "$OUR_HOOK" \
-                '. + {hooks: {PreToolUse: [$hook]}}' \
-                "$SETTINGS_FILE" > "$SETTINGS_FILE.tmp"
-            mv "$SETTINGS_FILE.tmp" "$SETTINGS_FILE"
-        fi
+    if [[ ! -x "$CLAUDE_HOOK_COMMAND" ]]; then
+        chmod +x "$CLAUDE_HOOK_COMMAND"
     fi
-else
-    jq -n --argjson hook "$OUR_HOOK" \
-        '{hooks: {PreToolUse: [$hook]}}' \
-        > "$SETTINGS_FILE"
-fi
 
-echo "Updated settings.json with HTTP hook"
-echo ""
-echo "===================================="
-echo "Installation complete!"
-echo ""
-echo "The uncompromising-standards hook will call:"
-echo "  $HOOK_URL"
-echo ""
-echo "IMPORTANT: Restart Claude Code or start a new session"
-echo "for the hook to take effect."
-echo ""
-echo "To move to another server, update HOOK_URL to server IP."
+    echo "Uncompromising Standards Installer"
+    echo "=================================="
+    echo ""
+
+    install_claude_code
+    ensure_opencode_config
+    render_opencode_plugin
+
+    echo ""
+    echo "Installation complete."
+    echo ""
+    echo "Claude Code:"
+    echo "  Hook registered in $CLAUDE_SETTINGS_FILE"
+    echo "  Command: $CLAUDE_HOOK_COMMAND"
+    echo ""
+    echo "OpenCode:"
+    echo "  Config:  $OPENCODE_CONFIG_FILE"
+    echo "  Plugin:  $OPENCODE_PLUGIN_FILE"
+    echo ""
+    echo "Restart Claude Code and OpenCode so they pick up the new integration."
+}
+
+main "$@"

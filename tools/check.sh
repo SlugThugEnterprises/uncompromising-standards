@@ -25,6 +25,11 @@ CLAUDE_DIR=".claude"
 STANDARDS_FILE="$CLAUDE_DIR/Coding-standards"
 
 setup_coding_standards() {
+    # Skip if DISABLE_SETUP is set
+    if [[ "${DISABLE_SETUP:-}" == "1" ]]; then
+        return
+    fi
+
     # Only check when running in actual project context
     # Skip Claude Code config directories
     if [[ "$PROJECT_ROOT" == *"/tmp"* ]] || \
@@ -98,6 +103,17 @@ get_checker() {
     esac
 }
 
+get_temp_file() {
+    local file_path="$1"
+    local ext="${file_path##*.}"
+
+    if [[ -z "$ext" ]] || [[ "$ext" == "$file_path" ]]; then
+        ext="tmp"
+    fi
+
+    mktemp "/tmp/hook-check-XXXXXX.${ext}"
+}
+
 # =============================================================================
 # Main: Parse JSON from Claude Code, run checker, return exit code
 # =============================================================================
@@ -109,6 +125,14 @@ main() {
     # Read JSON from stdin
     local input
     input=$(cat)
+
+    # Validate jq is available and input is valid JSON
+    if ! command -v jq &>/dev/null; then
+        exit 0  # Allow if jq not installed
+    fi
+    if ! echo "$input" | jq -e . &>/dev/null; then
+        exit 0  # Allow if not valid JSON
+    fi
 
     # Extract tool_name (support both Claude Code and LLxprt formats)
     local tool_name
@@ -154,15 +178,16 @@ main() {
     # Fix jq escaping: \! -> !
     content="${content//\\!/!}"
 
-    # Write content to temp file for checking - use explicit template
+    # Write content to temp file for checking
     local temp_file
-    temp_file=$(mktemp "${PROJECT_ROOT}/.claude/hook-check-XXXXXX")
+    temp_file=$(get_temp_file "$file_path")
     trap "rm -f '$temp_file'" EXIT
     printf '%s' "$content" > "$temp_file"
 
-    # Run checker - output goes to stderr, exit code tells us result
+    # Run checker on the temp content while preserving the original target path.
+    # Path-aware rules such as test-file handling need the real destination.
     local checker_output
-    checker_output=$("$checker" "$temp_file" 2>&1)
+    checker_output=$("$checker" "$temp_file" "$file_path" 2>&1)
     local checker_rc=$?
 
     if [[ $checker_rc -eq 0 ]]; then

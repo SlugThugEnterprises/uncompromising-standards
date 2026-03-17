@@ -11,6 +11,7 @@ Quick reference for Claude Code configuration.
 - [Permissions](permissions.md) - Tool access control
 - [Environment](environment.md) - Environment variables
 - [Subagents](subagents.md) - Custom AI agents
+- [OpenCode](opencode.md) - Global plugin installation and coverage
 
 ## Quick Start
 
