@@ -48,13 +48,18 @@ should_bypass() {
 get_checker() {
     local file_path="$1"
     local ext="${file_path##*.}"
-    log_debug "  get_checker: ext=$ext"
-    case "$ext" in
-        rs)  echo "$CHECKERS_DIR/rs.sh" ;;
-        sh|bash) echo "$CHECKERS_DIR/sh.sh" ;;
-        py)  echo "$CHECKERS_DIR/py.sh" ;;
-        *)   echo "" ;;
-    esac
+
+    # Build checker map dynamically from checkers directory
+    # Each checker named <ext>.sh handles that extension
+    local checker_file="$CHECKERS_DIR/${ext}.sh"
+
+    if [[ -x "$checker_file" ]]; then
+        log_debug "  get_checker: found $checker_file for ext=$ext"
+        echo "$checker_file"
+    else
+        log_debug "  get_checker: no checker for ext=$ext"
+        echo ""
+    fi
 }
 
 main() {
@@ -143,31 +148,25 @@ main() {
         exit 0
     else
         log "ERROR" "BLOCKED: $file_path - $checker_output"
-        log_debug "  block reason: $checker_output"
         log_debug "=== check.sh END (BLOCKED) ==="
-        
-        # Detect OpenCode vs Claude Code
-        # OpenCode sends "write" (lowercase) and uses filePath (camelCase)
+
+        # Format error for caller type
         local caller="claude-code"
         if [[ "$tool_name" == "write" ]]; then
             caller="opencode"
         fi
-        
-        # Fallback: check if input contains filePath (camelCase, OpenCode format)
         if [[ "$input" == *"filePath"* ]]; then
             caller="opencode"
         fi
-        
-        # Format error message (strip ANSI codes and clean up)
+
+        # Format error message (strip ANSI codes)
         local formatted_reason
         formatted_reason=$(echo "$checker_output" | grep "FAIL" | grep -v "Check FAILED" | sed 's/.*FAIL.*: //' | sed 's/   File: .*//' | tr '\n' ';' | sed 's/;$//' | sed 's/\x1b\[[0-9;]*m//g')
         [[ -z "$formatted_reason" ]] && formatted_reason="Code standards check failed"
-        
+
         if [[ "$caller" == "opencode" ]]; then
-            # OpenCode: plain text to stderr
             echo "$formatted_reason" >&2
         else
-            # Claude Code: JSON to stderr
             jq -n --arg reason "$checker_output" '{"hookSpecificOutput": {"hookEventName": "PreToolUse", "permissionDecision": "deny", "permissionDecisionReason": $reason}}' >&2
         fi
         exit 2

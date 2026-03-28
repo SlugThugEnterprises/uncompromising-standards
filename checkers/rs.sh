@@ -8,7 +8,7 @@ set -uo pipefail
 
 # Fast Rust pattern checker - lightweight alternative to rust-analyzer
 # Uses regex patterns to catch common issues without full compilation
-# Enhanced with sanitization and balance checking from DO-NOT-EDIT checker
+# Tailored for UI/rendering/designer applications
 
 EXIT_CODE=0
 
@@ -19,8 +19,9 @@ GREEN='\033[0;32m'
 NC='\033[0m'
 
 # Configuration
-MAX_FILE_LINES=100
-MAX_FN_LINES=50
+MAX_FILE_LINES=400
+MAX_FN_LINES=80
+MAX_FN_COUNT=6
 
 # Check if file provided
 if [ $# -eq 0 ]; then
@@ -177,6 +178,20 @@ is_crate_root_file() {
     esac
 }
 
+is_render_file() {
+    case "$CONTEXT_PATH" in
+        */render/*|*/canvas/*|*/ui/view/*|*/ui/editor/*) return 0 ;;
+        *) return 1 ;;
+    esac
+}
+
+is_state_file() {
+    case "$CONTEXT_PATH" in
+        */app_state/*|*/state/*|*/ui/context.rs) return 0 ;;
+        *) return 1 ;;
+    esac
+}
+
 # =============================================================================
 # HELPERS
 # =============================================================================
@@ -189,6 +204,16 @@ emit() {
     echo "   File: $file"
     [[ "$line" != "0" ]] && echo "   Line: $line"
     EXIT_CODE=1
+}
+
+warn() {
+    local file="$1"
+    local line="$2"
+    local msg="$3"
+
+    echo -e "${YELLOW}⚠ WARN${NC}: $msg"
+    echo "   File: $file"
+    [[ "$line" != "0" ]] && echo "   Line: $line"
 }
 
 # =============================================================================
@@ -207,8 +232,19 @@ if is_test_file; then
     echo "ℹ️  Test file context detected: $CONTEXT_PATH"
 fi
 
+IS_RENDER_FILE=0
+if is_render_file; then
+    IS_RENDER_FILE=1
+    echo "ℹ️  Render/UI file context detected: $CONTEXT_PATH"
+fi
+
+IS_STATE_FILE=0
+if is_state_file; then
+    IS_STATE_FILE=1
+    echo "ℹ️  State file context detected: $CONTEXT_PATH"
+fi
+
 # Check 1: File length (code only, not comments)
-# Count lines that still contain code after removing comments and strings.
 TOTAL_LINES=$(wc -l < "$RUST_FILE")
 CODE_LINES=$(printf '%s' "$SANITIZED" | grep -c '[^[:space:]]' || echo 0)
 if [ "$CODE_LINES" -gt "$MAX_FILE_LINES" ]; then
@@ -228,12 +264,11 @@ CS=$(printf '%s' "$SANITIZED" | grep -o '\]' | wc -l | tr -d ' ') || true
 [ "$OS" -ne "$CS" ] && emit "$DISPLAY_PATH" 0 "Bracket mismatch: [=$OS ]=$CS"
 
 # Check 3: ALWAYS forbidden patterns (CRITICAL)
-# Unsafe / UB magnets
 while IFS=: read -r ln _; do
     emit "$DISPLAY_PATH" "$ln" "unsafe/UB-magnet forbidden"
 done < <(printf '%s' "$SANITIZED" | grep -nE '\bunsafe\b|\btransmute\b|\bzeroed\b|\bassume_init\b|\bget_unchecked\b|\bfrom_utf8_unchecked\b|intrinsics::|\baddr_of\b|\bstatic[[:space:]]+mut\b|\bUnsafeCell\b' || true)
 
-# Todo/unimplemented markers - check RAW file (not sanitized) since TODO in comments should also be caught
+# Todo/unimplemented markers - check RAW file so comments are caught too
 while IFS=: read -r ln _; do
     emit "$DISPLAY_PATH" "$ln" "unfinished marker/macro forbidden"
 done < <(grep -nE '\bTODO\b|\bFIXME\b|\bHACK\b|\bXXX\b|\bunimplemented!\(' "$RUST_FILE" || true)
@@ -260,7 +295,7 @@ if [ "$IS_TEST_FILE" -eq 0 ]; then
     done < <(printf '%s' "$SANITIZED" | grep -nE '\bpanic!\b|\bunreachable!\b|\bassert!\b|\bassert_eq!\b|\bdebug_assert!\b|\.unwrap\(|\.expect\(' || true)
 fi
 
-# unwrap_or variants (specific messages)
+# unwrap_or variants
 while IFS=: read -r ln _; do
     emit "$DISPLAY_PATH" "$ln" "unwrap_or() forbidden - handle error explicitly"
 done < <(printf '%s' "$SANITIZED" | grep -nE '\.unwrap_or\s*\(' || true)
@@ -268,11 +303,6 @@ done < <(printf '%s' "$SANITIZED" | grep -nE '\.unwrap_or\s*\(' || true)
 while IFS=: read -r ln _; do
     emit "$DISPLAY_PATH" "$ln" "unwrap_or_else() forbidden - handle error explicitly"
 done < <(printf '%s' "$SANITIZED" | grep -nE '\.unwrap_or_else\s*\(' || true)
-
-# Default::default()
-while IFS=: read -r ln _; do
-    emit "$DISPLAY_PATH" "$ln" "Default::default() forbidden"
-done < <(printf '%s' "$SANITIZED" | grep -nE '\bDefault::default\s*\(\s*\)' || true)
 
 # #[allow(...)] forbidden
 while IFS=: read -r ln _; do
@@ -296,103 +326,60 @@ while IFS=: read -r ln _; do
     emit "$DISPLAY_PATH" "$ln" "mock/fake/stub pattern forbidden"
 done < <(printf '%s' "$SANITIZED" | grep -nE '(mock|Mock|fake|Fake|stub|Stub|dummy|Dummy)\s*(struct|impl|fn|mod)' || true)
 
-# Check 8: Clone on copy (ERROR)
+# Check 8: unwrap_or_default (WARN)
 while IFS=: read -r ln _; do
-    emit "$DISPLAY_PATH" "$ln" "unnecessary clone on copy"
-done < <(printf '%s' "$SANITIZED" | grep -nE '\.clone\(\)' || true)
-
-# Check 9: unwrap_or_default (ERROR)
-while IFS=: read -r ln _; do
-    emit "$DISPLAY_PATH" "$ln" "unwrap_or_default should be avoided"
+    warn "$DISPLAY_PATH" "$ln" "unwrap_or_default used - verify silent fallback is truly correct"
 done < <(printf '%s' "$SANITIZED" | grep -nE '\.unwrap_or_default\(\)' || true)
 
-# Check 10: as_str().to_string() (ERROR)
+# Check 9: as_str().to_string() (WARN)
 while IFS=: read -r ln _; do
-    emit "$DISPLAY_PATH" "$ln" "use to_owned() instead of as_str().to_string()"
+    warn "$DISPLAY_PATH" "$ln" "use to_owned() instead of as_str().to_string()"
 done < <(printf '%s' "$SANITIZED" | grep -nE '\.as_str\(\)\.to_string\(\)' || true)
 
-# Check 11: Dyn trait misuse (WARNING/CRITICAL)
+# Check 10: Dyn trait misuse (FAIL)
 while IFS=: read -r ln _; do
     emit "$DISPLAY_PATH" "$ln" "dyn trait-object misuse in generics"
 done < <(printf '%s' "$SANITIZED" | grep -nE '<[[:space:]]*\( *dyn\b|\( *dyn\b[^)]*\) *>' || true)
 
-# Check 12: Single-letter variables (WARNING) - show full context
-# Allow single-letter vars in for loops: for i in, for j in, etc.
+# Check 11: Single-letter variables (WARN)
 while IFS=: read -r ln line; do
     id=$(echo "$line" | sed -nE 's/^\s*let\s+([A-Za-z])\b.*/\1/p')
     [[ -z "$id" ]] && continue
-    # Allow i, j, k, x, y, z everywhere
     case "$id" in i|j|k|x|y|z) continue ;; esac
-    # Allow single-letter vars in for loops: for i in 0..10, for item in items
     if echo "$line" | grep -qE '^\s*for\s+[a-z]\b'; then
         continue
     fi
-    emit "$DISPLAY_PATH" "$ln" "single-letter var '$id' - use descriptive name (e.g., '$id' -> $(echo "$id" | sed -e 's/a/alpha/g' -e 's/b/beta/g' -e 's/c/count/g' -e 's/r/result/g' -e 's/s/source/g' -e 's/t/temp/g'))"
+    warn "$DISPLAY_PATH" "$ln" "single-letter var '$id' - use descriptive name"
 done < <(printf '%s' "$SANITIZED" | grep -nE '^\s*let\s+[A-Za-z]\b' || true)
 
-# Check 13: #![forbid(unsafe_code)] at crate root (only main.rs/lib.rs)
+# Check 12: #![forbid(unsafe_code)] at crate root
 if is_crate_root_file && ! head -5 "$RUST_FILE" | grep -q '^#!\[forbid(unsafe_code)\]'; then
     emit "$DISPLAY_PATH" 0 "Missing #![forbid(unsafe_code)] at crate root"
 fi
 
-# Check 14: Dynamic allocation forbidden (vec!, Box, HashMap, Arc, Rc)
-while IFS=: read -r ln _; do
-    emit "$DISPLAY_PATH" "$ln" "dynamic allocation forbidden (vec!/Box/HashMap/Arc/Rc)"
-done < <(printf '%s' "$SANITIZED" | grep -nE '\b(vec!|Box::|HashMap::|Arc::|Rc::)\b' || true)
+# Check 13: Render determinism hazards in render files
+if [ "$IS_RENDER_FILE" -eq 1 ] && [ "$IS_TEST_FILE" -eq 0 ]; then
+    while IFS=: read -r ln _; do
+        emit "$DISPLAY_PATH" "$ln" "nondeterministic source forbidden in render path (rand/time/thread_rng)"
+    done < <(printf '%s' "$SANITIZED" | grep -nE '\brand::|\bthread_rng\b|\bSystemTime::now\b|\bInstant::now\b|\brandom\s*\(' || true)
 
-# Check 15: Direct array indexing forbidden (exclude vec!, array literals, and 2D access)
-while IFS=: read -r ln line; do
-    # Skip lines with vec! macro
-    if echo "$line" | grep -qE 'vec!'; then
-        continue
-    fi
-    # Skip attributes such as #[test]
-    if echo "$line" | grep -qE '^\s*#\['; then
-        continue
-    fi
-    # Skip array literal access patterns like [1, 2, 3][0] or ["a", "b"][1]
-    if echo "$line" | grep -qE '\[\s*\[[^\]]+\]\s*\]\s*\['; then
-        continue
-    fi
-    # Skip 2D array access like matrix[i][j] - this is intentional in the rules
-    if echo "$line" | grep -qE '\]\s*\['; then
-        continue
-    fi
-    # Extract just the indexing part for context
-    match=$(echo "$line" | grep -oE '\[[0-9]+\]|\[[a-z_][a-z0-9_]*\]' | head -1)
-    [[ -z "$match" ]] && continue
-    emit "$DISPLAY_PATH" "$ln" "direct indexing $match forbidden - use .get() instead"
-done < <(printf '%s' "$SANITIZED" | grep -nE '\[[0-9]+\]|\[[a-z_][a-z0-9_]*\]' || true)
+    while IFS=: read -r ln _; do
+        emit "$DISPLAY_PATH" "$ln" "borrow_mut() forbidden in render path - render must use stable snapshot"
+    done < <(printf '%s' "$SANITIZED" | grep -nE '\.borrow_mut\s*\(' || true)
 
-# Check 16: Unsafe blocks forbidden
-while IFS=: read -r ln _; do
-    emit "$DISPLAY_PATH" "$ln" "unsafe block forbidden"
-done < <(printf '%s' "$SANITIZED" | grep -nE '\bunsafe\s*\{' || true)
+    while IFS=: read -r ln _; do
+        warn "$DISPLAY_PATH" "$ln" "float equality in render path - verify tolerance-based comparison is not needed"
+    done < <(printf '%s' "$SANITIZED" | grep -nE '==.*(f32|f64)|!=.*(f32|f64)' || true)
+fi
 
-# Check 17: Bare arithmetic operators forbidden - show which operator
-# Match operators with or without surrounding spaces (but not -> or =>)
-while IFS=: read -r ln line; do
-    # Find which operator was used - check for -> or => first (not arithmetic)
-    if echo "$line" | grep -qE -- '->|=>'; then
-        continue
-    fi
-    if echo "$line" | grep -qP '(?<![[:alnum:]_])\+(?![[:alnum:]_])'; then
-        op="+"
-    elif echo "$line" | grep -qP '(?<![[:alnum:]_])\-(?![[:alnum:]_])'; then
-        op="-"
-    elif echo "$line" | grep -qP '(?<![[:alnum:]_])\*(?![[:alnum:]_])'; then
-        op="*"
-    elif echo "$line" | grep -qP '(?<![[:alnum:]_])/(?![[:alnum:]_])'; then
-        op="/"
-    elif echo "$line" | grep -qP '(?<![[:alnum:]_])%(?![[:alnum:]_])'; then
-        op="%"
-    else
-        op="arithmetic"
-    fi
-    emit "$DISPLAY_PATH" "$ln" "bare '$op' operator forbidden - use .saturating_add()/.saturating_sub() instead"
-done < <(printf '%s' "$SANITIZED" | grep -nP '(?<![[:alnum:]_])[\+\-\*/%](?![[:alnum:]_])' || true)
+# Check 14: State mutation hazards in state/UI files
+if [ "$IS_STATE_FILE" -eq 1 ] && [ "$IS_TEST_FILE" -eq 0 ]; then
+    while IFS=: read -r ln _; do
+        warn "$DISPLAY_PATH" "$ln" "Rc<RefCell<...>> detected - verify mutation boundaries are narrow and controlled"
+    done < <(printf '%s' "$SANITIZED" | grep -nE 'Rc\s*<\s*RefCell\s*<' || true)
+fi
 
-# Check 18: Function length (WARNING)
+# Check 15: Function length (WARN)
 printf '%s' "$SANITIZED" | awk -v file="$DISPLAY_PATH" -v limit="$MAX_FN_LINES" '
 function start_fn(line) { return (line ~ /(^|[[:space:]])fn[[:space:]]+[A-Za-z0-9_]+/) }
 BEGIN { in_fn=0; depth=0; start=0; }
@@ -415,9 +402,8 @@ BEGIN { in_fn=0; depth=0; start=0; }
     }
 }
 ' | while IFS= read -r line; do
-    # Extract line number and message
     ln=$(echo "$line" | cut -d: -f2)
-    emit "$DISPLAY_PATH" "$ln" "function too long"
+    warn "$DISPLAY_PATH" "$ln" "function too long"
 done
 
 echo "━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━"
