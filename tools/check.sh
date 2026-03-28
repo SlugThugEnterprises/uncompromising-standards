@@ -1,211 +1,175 @@
 #!/usr/bin/env bash
 # =============================================================================
-# Code Standards Checker - Claude Code Pre-Write Hook
-#
-# Receives JSON from Claude Code, checks code against standards,
-# returns exit code to allow/block the Write operation.
-#
-# Exit codes:
-#   0 = allow (check passed)
-#   2 = block (check failed, stderr contains reason)
+# Code Standards Checker - Pre-Write Hook
+# Receives JSON from stdin, validates code, returns allow/deny.
+# Exit codes: 0 = allow, 2 = block
 # =============================================================================
 
 set -uo pipefail
-set +H  # Disable history expansion
+set +H
 
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 PROJECT_ROOT="$(cd "$SCRIPT_DIR/.." && pwd)"
 CHECKERS_DIR="$PROJECT_ROOT/checkers"
 
-# =============================================================================
-# Check for coding standards file and create if missing
-# =============================================================================
+LOG_DIR="${LOG_DIR:-$PROJECT_ROOT/logs}"
+LOG_FILE="$LOG_DIR/hook.log"
+DEBUG_LOG="${LOG_DIR}/hook.debug.log"
 
-CLAUDE_DIR=".claude"
-STANDARDS_FILE="$CLAUDE_DIR/Coding-standards"
-
-setup_coding_standards() {
-    # Skip if DISABLE_SETUP is set
-    if [[ "${DISABLE_SETUP:-}" == "1" ]]; then
-        return
-    fi
-
-    # Only check when running in actual project context
-    # Skip Claude Code config directories
-    if [[ "$PROJECT_ROOT" == *"/tmp"* ]] || \
-       [[ "$PROJECT_ROOT" == "/root"* ]] || \
-       [[ "$PROJECT_ROOT" == "$HOME/.config"* ]]; then
-        return
-    fi
-
-    # Create .claude directory if it doesn't exist
-    if [[ ! -d "$PROJECT_ROOT/$CLAUDE_DIR" ]]; then
-        mkdir -p "$PROJECT_ROOT/$CLAUDE_DIR"
-    fi
-
-    # Create coding standards file if it doesn't exist
-    if [[ ! -f "$PROJECT_ROOT/$STANDARDS_FILE" ]]; then
-        # Determine which rules file to use based on project files
-        local rules_file=""
-
-        # Check for project type markers in order of specificity
-        if [[ -f "$PROJECT_ROOT/go.mod" ]]; then
-            rules_file="$SCRIPT_DIR/../rules/RULES.go.md"
-        elif [[ -f "$PROJECT_ROOT/package.json" ]]; then
-            rules_file="$SCRIPT_DIR/../rules/RULES.javascript.md"
-        elif [[ -f "$PROJECT_ROOT/Pipfile" ]] || [[ -f "$PROJECT_ROOT/requirements.txt" ]]; then
-            rules_file="$SCRIPT_DIR/../rules/RULES.python.md"
-        elif [[ -f "$PROJECT_ROOT/Cargo.toml" ]]; then
-            rules_file="$SCRIPT_DIR/../rules/RULES.rust.md"
-        else
-            # Default to rust rules (since this hook is primarily for rust)
-            rules_file="$SCRIPT_DIR/../rules/RULES.rust.md"
-        fi
-
-        # Copy the rules file if it exists
-        if [[ -f "$rules_file" ]]; then
-            cp "$rules_file" "$PROJECT_ROOT/$STANDARDS_FILE"
-        fi
-    fi
+setup_logging() {
+    mkdir -p "$LOG_DIR"
+    chmod 755 "$LOG_DIR"
 }
 
-# =============================================================================
-# Check if file should be bypassed (hook/tooling files)
-# =============================================================================
+log() {
+    local level="$1"
+    local msg="$2"
+    echo "[$(date '+%Y-%m-%d %H:%M:%S')] [$level] $msg" >> "$LOG_FILE"
+}
+
+log_debug() {
+    [[ "${HOOK_DEBUG:-0}" == "1" ]] && echo "[$(date '+%Y-%m-%d %H:%M:%S.%3N')] $1" >> "$DEBUG_LOG"
+}
 
 should_bypass() {
     local file_path="$1"
-
-    # Directories that bypass validation
+    log_debug "  should_bypass: $file_path"
     local bypass_dirs=("hooks" "tools" "checkers" "rules" ".claude")
-
     for dir in "${bypass_dirs[@]}"; do
         if [[ "$file_path" == *"/$dir/"* ]] || [[ "$file_path" == *"/$dir" ]] || [[ "$file_path" == "$dir"* ]]; then
-            return 0  # bypass
+            log_debug "  BYPASSED (dir: $dir)"
+            return 0
         fi
     done
-    return 1  # don't bypass
+    log_debug "  NOT bypassed"
+    return 1
 }
-
-# =============================================================================
-# Get checker script for file type
-# =============================================================================
 
 get_checker() {
     local file_path="$1"
     local ext="${file_path##*.}"
-
+    log_debug "  get_checker: ext=$ext"
     case "$ext" in
-        rs) echo "$CHECKERS_DIR/rs.sh" ;;
+        rs)  echo "$CHECKERS_DIR/rs.sh" ;;
         sh|bash) echo "$CHECKERS_DIR/sh.sh" ;;
-        py) echo "$CHECKERS_DIR/py.sh" ;;
-        *) echo "" ;;
+        py)  echo "$CHECKERS_DIR/py.sh" ;;
+        *)   echo "" ;;
     esac
 }
-
-get_temp_file() {
-    local file_path="$1"
-    local ext="${file_path##*.}"
-
-    if [[ -z "$ext" ]] || [[ "$ext" == "$file_path" ]]; then
-        ext="tmp"
-    fi
-
-    mktemp "/tmp/hook-check-XXXXXX.${ext}"
-}
-
-# =============================================================================
-# Main: Parse JSON from Claude Code, run checker, return exit code
-# =============================================================================
 
 main() {
-    # Setup coding standards file if needed
-    setup_coding_standards
-
-    # Read JSON from stdin
+    setup_logging
+    log_debug "=== check.sh START ==="
+    log_debug "  Args: $@"
+    
     local input
     input=$(cat)
-
-    # Validate jq is available and input is valid JSON
-    if ! command -v jq &>/dev/null; then
-        exit 0  # Allow if jq not installed
-    fi
+    log_debug "  Raw input: $input"
+    
     if ! echo "$input" | jq -e . &>/dev/null; then
-        exit 0  # Allow if not valid JSON
+        log "WARN" "Invalid JSON - allowing"
+        log_debug "=== check.sh END (invalid JSON) ==="
+        exit 0
     fi
-
-    # Extract tool_name (support both Claude Code and LLxprt formats)
+    
     local tool_name
     tool_name=$(echo "$input" | jq -r '.tool_name // .tool // empty')
-
-    # Only run on Write operations
+    log_debug "  tool_name: '$tool_name'"
+    
     case "$tool_name" in
-        Write|WriteFile|write_file) ;;
-        *) exit 0 ;;
+        Write|WriteFile|write_file|write)
+            log_debug "  Processing Write operation"
+            ;;
+        *)
+            log_debug "  Skipping (not Write): $tool_name"
+            log_debug "=== check.sh END (not Write) ==="
+            exit 0
+            ;;
     esac
-
-    # Extract file path
+    
     local file_path
-    file_path=$(echo "$input" | jq -r '.tool_input.file_path // .tool_input.path // empty')
-
+    file_path=$(echo "$input" | jq -r '.tool_input.file_path // .tool_input.path // .tool_input.filePath // empty')
+    log_debug "  file_path: '$file_path'"
+    
     if [[ -z "$file_path" ]]; then
+        log "WARN" "No file path - allowing"
+        log_debug "=== check.sh END (no file_path) ==="
         exit 0
     fi
-
-    # Check if file should bypass validation
+    
     if should_bypass "$file_path"; then
+        log "INFO" "Bypassed: $file_path"
+        log_debug "=== check.sh END (bypassed) ==="
         exit 0
     fi
-
-    # Get checker for this file type
+    
     local checker
     checker=$(get_checker "$file_path")
-
+    log_debug "  checker: '$checker'"
+    
     if [[ -z "$checker" ]] || [[ ! -x "$checker" ]]; then
-        # No checker = allow
+        log "INFO" "No checker for $file_path - allowing"
+        log_debug "=== check.sh END (no checker) ==="
         exit 0
     fi
-
-    # Extract content
+    
     local content
     content=$(echo "$input" | jq -r '.tool_input.content // empty')
-
+    log_debug "  content length: ${#content} chars"
+    
     if [[ -z "$content" ]]; then
-        # No content = allow
+        log "WARN" "No content - allowing"
+        log_debug "=== check.sh END (no content) ==="
         exit 0
     fi
-
-    # Fix jq escaping: \! -> !
+    
     content="${content//\\!/!}"
-
-    # Write content to temp file for checking
+    
     local temp_file
-    temp_file=$(get_temp_file "$file_path")
-    trap "rm -f '$temp_file'" EXIT
+    temp_file=$(mktemp "/tmp/hook-check-XXXXXX.${file_path##*.}")
     printf '%s' "$content" > "$temp_file"
-
-    # Run checker on the temp content while preserving the original target path.
-    # Path-aware rules such as test-file handling need the real destination.
+    log_debug "  temp_file: $temp_file"
+    
     local checker_output
     checker_output=$("$checker" "$temp_file" "$file_path" 2>&1)
     local checker_rc=$?
-
+    rm -f "$temp_file"
+    
+    log_debug "  checker exit code: $checker_rc"
+    
     if [[ $checker_rc -eq 0 ]]; then
-        # Check passed - allow
+        log "INFO" "ALLOWED: $file_path"
+        log_debug "=== check.sh END (ALLOWED) ==="
         exit 0
     else
-        # Check failed - format as proper JSON response
-        local formatted
-        formatted=$(echo "$checker_output" | "$SCRIPT_DIR/format-error.sh")
-        if [[ -z "$formatted" ]]; then
-            formatted="Code standards check failed"
+        log "ERROR" "BLOCKED: $file_path - $checker_output"
+        log_debug "  block reason: $checker_output"
+        log_debug "=== check.sh END (BLOCKED) ==="
+        
+        # Detect OpenCode vs Claude Code
+        # OpenCode sends "write" (lowercase) and uses filePath (camelCase)
+        local caller="claude-code"
+        if [[ "$tool_name" == "write" ]]; then
+            caller="opencode"
         fi
-        # LLxprt expects deny on stdout
-        if [[ "$input" == *'"tool"'* ]]; then
-            jq -n --arg reason "$formatted" '{"decision": "deny", "reason": $reason}'
+        
+        # Fallback: check if input contains filePath (camelCase, OpenCode format)
+        if [[ "$input" == *"filePath"* ]]; then
+            caller="opencode"
         fi
-        # Claude Code expects deny on stderr - properly escape JSON
-        jq -n --arg reason "$formatted" '{"hookSpecificOutput": {"hookEventName": "PreToolUse", "permissionDecision": "deny", "permissionDecisionReason": $reason}}' >&2
+        
+        # Format error message (strip ANSI codes and clean up)
+        local formatted_reason
+        formatted_reason=$(echo "$checker_output" | grep "FAIL" | grep -v "Check FAILED" | sed 's/.*FAIL.*: //' | sed 's/   File: .*//' | tr '\n' ';' | sed 's/;$//' | sed 's/\x1b\[[0-9;]*m//g')
+        [[ -z "$formatted_reason" ]] && formatted_reason="Code standards check failed"
+        
+        if [[ "$caller" == "opencode" ]]; then
+            # OpenCode: plain text to stderr
+            echo "$formatted_reason" >&2
+        else
+            # Claude Code: JSON to stderr
+            jq -n --arg reason "$checker_output" '{"hookSpecificOutput": {"hookEventName": "PreToolUse", "permissionDecision": "deny", "permissionDecisionReason": $reason}}' >&2
+        fi
         exit 2
     fi
 }
